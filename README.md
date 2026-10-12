@@ -73,6 +73,72 @@ FreeCADGui.runCommand("CAM_Surface5Axis")
 Tested with **FreeCAD 1.1.1** on Windows. The `Path.Op` layout it uses is the same in 1.0 and 1.2,
 but neither has been run.
 
+## Trying it by hand
+
+Two routes. The first builds the whole scene in one go, to see a path within a minute; the second is
+what a user actually does, and is the one that reaches the parts a script cannot — the command
+appearing, the task panel, the tool library.
+
+### A scene in one paste
+
+With FreeCAD open, in the Python console (**View -> Panels -> Python console**):
+
+```python
+import sys; ROOT = r"C:\Users\zdroyer\dev\C++\inkin5ax\kin5axcam"
+sys.path.insert(0, ROOT)
+exec(open(ROOT + r"\examples\make_test_job.py").read())
+build("box")            # a flat top face
+build("hemisphere")     # a face curved both ways
+```
+
+Each call makes a document with the shape, a CAM job, a tool controller holding the **6 mm Ball
+End** bit of FreeCAD's own library, and the operation, and prints what came out. What to look for:
+
+| | the box, 100 x 50 x 10 | the hemisphere, radius 20 |
+|---|---|---|
+| every cutting move | `Z 13.000` - the top at 10 plus the ball radius 3 | - |
+| every ball centre | - | 23.000 from the middle: 20 plus 3 |
+| in the 3D view | the path floats one radius above the face | a dome of passes standing off the surface |
+
+That the path floats above the surface is the ball centre convention, not a fault. Switch
+`InvertNormal` on and it drops to one radius *under* the face, which is the same thing from the
+other side.
+
+The same script runs without a window, which is the quickest check that nothing is broken:
+
+```sh
+"C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" examples/make_test_job.py
+```
+
+### The route a user takes
+
+1. **Part** workbench: a box, or a sphere with `Angle1 = 0` for a hemisphere.
+2. **CAM** workbench. The command registers the first time CAM is activated; check with
+   `"CAM_Surface5Axis" in FreeCADGui.listCommands()` in the console.
+3. **Tools -> Customize -> Toolbars**: make a toolbar in the CAM workbench and put *3D Surface
+   (5axis)* on it. An addon cannot add a button to a toolbar it does not own, which is why this is
+   by hand.
+4. Create a **Job** on the shape.
+5. In the job's **Tools**, add the **6 mm Ball End** bit from the library. Worth trying the other
+   way first: leave the default 5 mm end mill selected, run the operation, and the report view says
+   what is wrong while the path stays empty.
+6. Select the face to cut - one face, the top one.
+7. Run the command. The task panel asks for the passes, the points per pass, which parameter they
+   sweep, there and back, and which side of the face. Change a field and the path follows.
+8. **OK**, then look at the path in the 3D view and at **CAM -> Inspect G-code**.
+
+Things worth doing to it on purpose: pick two faces (the report view says it works on one); cut a
+hole through the box with a cylinder and work on the holed top face (the passes come apart at the
+hole instead of crossing it); set the points per pass to 1 (refused with a reason).
+
+### One thing about FreeCAD 1.1.1
+
+A script that leaves a job with **two** tool controllers and then creates an operation hits an
+`UnboundLocalError` in `PathUtils.findToolController`: with no user interface to ask which
+controller to use, it returns a variable it never assigned. Under the interface the question is a
+dialog and nothing goes wrong. `examples/make_test_job.py` therefore removes the job's default
+controller after adding the ball end one; keep to one controller in a headless script of your own.
+
 ## The tests
 
 ```sh
@@ -97,6 +163,7 @@ other fourteen still run.
 | `kin5axcam/surface5axis_gui.py` | the task panel and the command registration |
 | `InitGui.py` | registers the command when CAM is first activated |
 | `tests/` | the two halves of the test suite |
+| `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |
 
 The operation depends on nothing of kin5ax: a toolpath knows no machine. kin5ax enters at the
 postprocessor, which is the next thing to build.

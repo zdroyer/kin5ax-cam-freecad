@@ -1,0 +1,102 @@
+# kin5axcam — 3D Surface (5axis) for the CAM workbench of FreeCAD
+
+A new operation in FreeCAD's CAM workbench: a zigzag over the parameter space of **one face**, cut
+with a **ball nose** tool. It is the toolpath source for the five-axis postprocessor of
+[kin5ax](../kin5ax/), built in three stages:
+
+| stage | the tool axis | state |
+|---|---|---|
+| 1 | stands up, as in any three-axis operation | **done** |
+| 2 | along the surface normal | next |
+| 3 | leaning away from the normal by one angle, in a direction given by a second | after that |
+
+Stages 2 and 3 add the axis to each move as `I`, `J` and `K` — the vector output convention — so
+`G1 X.. Y.. Z.. I.. J.. K..`. Stage 1 writes no `I J K`: no axis written means the tool stands up,
+which is unambiguous.
+
+## The point the path carries
+
+**The centre of the ball, not the tip of the tool.** The surface point moved one tool radius along
+the surface normal. That is the programmed point of a ball nose tool in cutter location data and the
+point kin5ax solves for, so the path feeds the five-axis postprocessor with nothing in between.
+
+It also means **an ordinary three-axis postprocessor, which expects the tip, cuts one radius too
+high**, and the path drawn in the 3D view floats one radius above the surface. Both are the price of
+one convention through the whole chain. A property to write tip coordinates instead would be a small
+addition if a stock post has to be used.
+
+Moving the centre along the normal puts the ball exactly on the surface at the point it came from.
+It says nothing about the rest of the ball, so in a concave corner tighter than the tool radius the
+tool still gouges — the usual limit of a point-by-point offset.
+
+## What the operation does
+
+Passes are laid across the face and points along each pass, both **counted in the parameter space of
+the surface**. A face whose parameters run unevenly — the poles of a sphere, an unevenly
+parametrised NURBS — therefore gets unevenly spaced passes. A step over in millimetres needs
+arc-length sampling and is a later stage.
+
+A row breaks into more than one pass where the face is not there: a hole, a trimmed edge. The tool
+is lifted to the clearance height over the gap instead of cutting across it, which is what
+`Part.Face.isPartOfDomain` is asked about at every point. What is left of a row after the gaps has
+to be at least two points, since one point cuts nothing.
+
+| property | |
+|---|---|
+| `Rows` | how many passes across the face |
+| `PointsPerRow` | how many points along each pass |
+| `PathDirection` | `U` for passes at constant v, `V` for passes at constant u |
+| `ZigZag` | cut there and back, rather than returning through the air |
+| `InvertNormal` | put the tool on the other side of the face |
+
+The operation refuses, with a message in the report view rather than a silent wrong path: a tool
+that is not a ball nose one, no face, more than one face, and parameters that cannot make a path.
+
+## Installing it
+
+Copy or symlink this directory into FreeCAD's `Mod` folder:
+
+| | |
+|---|---|
+| Windows | `%APPDATA%\FreeCAD\Mod\kin5axcam` |
+| Linux | `~/.local/share/FreeCAD/Mod/kin5axcam` |
+
+It registers the command `CAM_Surface5Axis` the first time the CAM workbench is activated. An addon
+cannot add a button to the toolbar of a workbench it does not own, so reach it either through
+**Tools → Customize → Toolbars** (add it to a CAM toolbar of your own), or from the Python console
+with a CAM Job active:
+
+```python
+FreeCADGui.runCommand("CAM_Surface5Axis")
+```
+
+Tested with **FreeCAD 1.1.1** on Windows. The `Path.Op` layout it uses is the same in 1.0 and 1.2,
+but neither has been run.
+
+## The tests
+
+```sh
+py -3 run_tests.py                                    # the geometry, no FreeCAD needed
+"C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
+```
+
+21 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+— a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
+things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
+without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
+against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
+operation and reads the commands that come out. Without FreeCAD those seven are skipped and the
+other fourteen still run.
+
+## Where things are
+
+| | |
+|---|---|
+| `kin5axcam/pathgen.py` | the geometry: the zigzag and the ball centre. No FreeCAD in it |
+| `kin5axcam/surface5axis.py` | the operation: properties, the face, the tool, the commands |
+| `kin5axcam/surface5axis_gui.py` | the task panel and the command registration |
+| `InitGui.py` | registers the command when CAM is first activated |
+| `tests/` | the two halves of the test suite |
+
+The operation depends on nothing of kin5ax: a toolpath knows no machine. kin5ax enters at the
+postprocessor, which is the next thing to build.

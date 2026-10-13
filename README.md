@@ -92,6 +92,17 @@ is there, in the Python console:
 "CAM_Surface5Axis" in FreeCADGui.listCommands()     # True
 ```
 
+If that says `False`, register it by hand and read what it says:
+
+```python
+from kin5axcam import surface5axis_gui
+```
+
+That is the same import the addon does for itself, so whatever stopped it comes out as a traceback
+rather than as silence. The registration waits for the CAM workbench because neither CAM nor the
+signal to wait on exists while FreeCAD is still starting; a report view that says `not registered
+yet ... waiting for the CAM workbench` has not given up, it retries on every workbench change.
+
 The command comes with its own icon. An addon cannot add a button to the toolbar of a workbench it
 does not own, so put it on one through **Tools -> Customize -> Toolbars**, or run it from the console
 with a CAM Job active:

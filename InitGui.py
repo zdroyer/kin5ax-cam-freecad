@@ -1,48 +1,80 @@
-# The 3D Surface (5axis) operation is a part of the CAM workbench, not a workbench of its own, so
-# this file waits until CAM is activated the first time and registers the command then. Importing
-# the CAM Gui at startup would pull the whole workbench in before anybody asked for it, and a
-# startup file that throws takes FreeCAD's startup with it - hence the try.
+# Registers the 3D Surface (5axis) operation with the CAM workbench.
+#
+# The timing is the whole difficulty here. This file is read while FreeCAD is still starting, and at
+# that moment two things are not ready: the CAM workbench cannot be imported, and the main window has
+# no workbenchActivated signal to wait on - that signal appears only once the Qt event loop runs.
+# FreeCAD's own Tux addon works around the second by polling with a timer until the window reports an
+# event loop (Mod/Tux/PersistentToolbarsGui.py), which is the pattern followed here.
+#
+# So: poll until the signal exists, then try to register on every workbench activation until it
+# works. A failure is reported once and retried, never swallowed into "registered" - which is the
+# mistake the first version of this file made, leaving the command missing and nothing saying why.
 
 import FreeCAD
 
+try:
+    import FreeCADGui
+    from PySide import QtCore
+except ImportError:                                  # no user interface: nothing to register with
+    FreeCADGui = None
+
 
 class Kin5axCam:
-    """Registers CAM_Surface5Axis the first time the CAM workbench is activated."""
+    """Puts CAM_Surface5Axis in place as soon as the CAM workbench can be imported."""
 
-    registered = False
+    done = False
+    complained = False
+    timer = None
+    window = None
 
     @classmethod
-    def register(cls, workbench_name=None):
-        if cls.registered:
-            return
-        if workbench_name is not None and "CAM" not in str(workbench_name):
+    def register(cls, *ignored):
+        """Imports the command, which registers it. True when it is in place."""
+        if cls.done:
+            return True
+        try:
+            from kin5axcam import surface5axis_gui   # noqa: F401 - the import registers the command
+            cls.done = True
+            FreeCAD.Console.PrintLog("kin5axcam: CAM_Surface5Axis registered\n")
+            return True
+        except Exception as problem:
+            #CAM is not importable yet, which is ordinary this early; say so once and keep trying
+            if not cls.complained:
+                cls.complained = True
+                FreeCAD.Console.PrintLog(
+                    "kin5axcam: not registered yet (%s: %s); waiting for the CAM workbench\n"
+                    % (type(problem).__name__, problem))
+            return False
+
+    @classmethod
+    def whenTheWindowIsReady(cls):
+        """Called by the timer until the main window has the signal to hang the retry on."""
+        if cls.done:
+            cls.timer.stop()
             return
         try:
-            from kin5axcam import surface5axis_gui       # noqa: F401 - the import registers it
-            cls.registered = True
-            FreeCAD.Console.PrintLog("kin5axcam: CAM_Surface5Axis registered\n")
-        except Exception as problem:
-            FreeCAD.Console.PrintError(
-                "kin5axcam: the 3D Surface (5axis) operation could not be registered: %s\n" % problem)
-            cls.registered = True                        # once is enough; do not nag on every switch
+            if not cls.window.property("eventLoop"):
+                return
+            cls.window.workbenchActivated            # raises until the signal exists
+        except Exception:
+            return
+        cls.timer.stop()
+        cls.window.workbenchActivated.connect(cls.register)
+        cls.register()                               # in case CAM is the workbench already up
 
 
-def _connect():
-    import FreeCADGui
-
-    window = FreeCADGui.getMainWindow()
-    if window is None:
-        return False
-    signal = getattr(window, "workbenchActivated", None)
-    if signal is None:
-        return False
-    signal.connect(Kin5axCam.register)
-    return True
+def start():
+    if FreeCADGui is None:
+        return
+    Kin5axCam.window = FreeCADGui.getMainWindow()
+    if Kin5axCam.window is None:
+        return
+    Kin5axCam.timer = QtCore.QTimer()
+    Kin5axCam.timer.timeout.connect(Kin5axCam.whenTheWindowIsReady)
+    Kin5axCam.timer.start(500)
 
 
 try:
-    if not _connect():
-        #no main window, or a FreeCAD without that signal: register straight away
-        Kin5axCam.register()
-except Exception as problem:                             # pragma: no cover - startup must survive
-    FreeCAD.Console.PrintError("kin5axcam: %s\n" % problem)
+    start()
+except Exception as problem:                         # a startup file that throws takes startup with it
+    FreeCAD.Console.PrintError("kin5axcam: %s: %s\n" % (type(problem).__name__, problem))

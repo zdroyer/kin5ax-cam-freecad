@@ -187,7 +187,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-21 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+24 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

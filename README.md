@@ -199,7 +199,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-37 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+44 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
@@ -216,6 +216,7 @@ other fourteen still run.
 | `kin5axcam/surface5axis_gui.py` | the task panel and the command registration |
 | `InitGui.py` | two lines: hands the work to `kin5axcam/startup.py` |
 | `kin5axcam/startup.py` | waits for the CAM workbench, then registers the command |
+| `kin5axcam/selectionmode.py` | gets this operation past FreeCAD's hard-coded selection table |
 | `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
 | `tests/` | the two halves of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |

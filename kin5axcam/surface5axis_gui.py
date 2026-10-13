@@ -23,7 +23,13 @@ import FreeCADGui
 import Path.Op.Gui.Base as PathOpGui
 from PySide import QtCore, QtGui
 
-from kin5axcam import surface5axis
+from kin5axcam import selectionmode, surface5axis
+
+#Before the task dialog of an operation is shown, FreeCAD asks its selection table which gate this
+#operation works with, and that table has no room for one from outside: the lookup raises KeyError
+#inside ViewProvider.setEdit, before the dialog, so nothing appears at all. This puts this operation
+#in reach of the answer. See kin5axcam/selectionmode.py.
+selectionmode.install()
 
 translate = FreeCAD.Qt.translate
 QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP

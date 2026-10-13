@@ -54,17 +54,46 @@ that is not a ball nose one, no face, more than one face, and parameters that ca
 
 ## Installing it
 
-Copy or symlink this directory into FreeCAD's `Mod` folder:
+**Ask FreeCAD where its `Mod` folder is rather than guessing.** In the Python console:
 
-| | |
-|---|---|
-| Windows | `%APPDATA%\FreeCAD\Mod\kin5axcam` |
-| Linux | `~/.local/share/FreeCAD/Mod/kin5axcam` |
+```python
+FreeCAD.getUserAppDataDir()
+```
 
-It registers the command `CAM_Surface5Axis`, with its own icon, the first time the CAM workbench is
-activated. An addon
-cannot add a button to the toolbar of a workbench it does not own, so reach it either through
-**Tools → Customize → Toolbars** (add it to a CAM toolbar of your own), or from the Python console
+Addons go in `Mod` under whatever that prints. On FreeCAD 1.1 it prints a **versioned** folder:
+
+```
+C:\Users\you\AppData\Roaming\FreeCAD\v1-1\        ->  ...\FreeCAD\v1-1\Mod\kin5axcam
+~/.local/share/FreeCAD/v1-1/                      ->  ~/.local/share/FreeCAD/v1-1/Mod/kin5axcam
+```
+
+Older FreeCADs used `%APPDATA%\FreeCAD\Mod` with no version in it, and that is the trap: an addon
+dropped there under 1.1 is not loaded, not complained about, and not mentioned anywhere. If this
+addon does not appear, look there first and move it.
+
+Then link the directory rather than copying it, so what FreeCAD loads is what the repository holds
+and an edit needs no second step. Windows, no administrator needed:
+
+```powershell
+$mod = Join-Path $env:APPDATA "FreeCAD\v1-1\Mod"
+New-Item -ItemType Junction -Path (Join-Path $mod "kin5axcam") -Target "C:\path\to\inkin5ax\kin5axcam"
+```
+
+Linux:
+
+```sh
+ln -s ~/path/to/inkin5ax/kin5axcam ~/.local/share/FreeCAD/v1-1/Mod/kin5axcam
+```
+
+Restart FreeCAD and switch to the **CAM** workbench, which is when the command registers. To check it
+is there, in the Python console:
+
+```python
+"CAM_Surface5Axis" in FreeCADGui.listCommands()     # True
+```
+
+The command comes with its own icon. An addon cannot add a button to the toolbar of a workbench it
+does not own, so put it on one through **Tools -> Customize -> Toolbars**, or run it from the console
 with a CAM Job active:
 
 ```python

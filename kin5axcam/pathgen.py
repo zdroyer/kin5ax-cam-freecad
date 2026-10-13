@@ -325,29 +325,6 @@ def clip_to_depths(passes, bottom, top, tolerance=1.0e-7):
     return kept
 
 
-def in_layers(passes, step_down, bottom, top):
-    """The passes cut in bands from the top down, none of them deeper than step_down.
-
-    A surface operation that takes the whole depth in one go asks the tool to plunge the full height
-    of the part at the first steep place. Cutting in bands takes the top off first and works down, so
-    each band removes at most step_down of material.
-
-    Each point is cut once, in the band it falls into, rather than the whole path being repeated at
-    every level: a point already cut does not need visiting again, and the tool would only be moving
-    through air if it did. A step down of zero, or one that covers the whole range, is one band -
-    which is the path as it was.
-    """
-    if step_down <= 0.0 or top - bottom <= step_down:
-        return clip_to_depths(passes, bottom, top)
-    layers = []
-    level = top
-    while level > bottom:
-        lower = max(bottom, level - step_down)
-        layers.extend(clip_to_depths(passes, lower, level))
-        level = lower
-    return layers
-
-
 def start_near(passes, point, params):
     """The passes arranged so the path starts at whichever of its two ends is nearest the point.
 

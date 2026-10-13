@@ -92,20 +92,28 @@ to be at least two points, since one point cuts nothing.
 | `LeanAngle` | how far it leans from the normal |
 | `LeanRotation` | which way it leans, round the normal from the direction of travel |
 
-The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths** with
-the step down, **Heights**, a **start point**, and the tool controller and the coolant on the page of
-the operation itself.
+The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths**,
+**Heights**, a **start point**, and the tool controller and the coolant on the page of the operation
+itself.
 
 The depths mean what they say: the tip of the tool is kept between the final and the start depth, and
 a pass that leaves the range comes apart there, so the tool lifts over what it may not cut rather
 than dragging through it. The depths the operation suggests are the bottom of the face and the top of
 it plus room for the tip of a leaning tool, so by default nothing is held back.
 
-The **step down** cuts the depth in bands from the top down, none deeper than the step. Each point is
-cut once, in the band it falls into, rather than the whole path being repeated at every level: a
-point already cut needs no second visit, and the tool would only be moving through air if it had one.
-A step down of zero, or one that covers the whole range, is a single band, which is the path as it
-was.
+**A row of the zigzag is one pass**, from one edge of the face to the other, and the tool is lifted
+to the clearance height only at the end of it — or in the middle of it where the face is not there,
+or where the depths say the tool may not cut. Nothing else breaks a pass.
+
+There is **no step down**, and that is deliberate. The operation used to have one, which cut the
+depth in bands and kept each point in the band it fell into. On a face that falls away across itself
+— a cylinder, a blade — that chopped every row into a piece per band with a lift to the clearance
+height between them, and dropped whichever band was left holding a single point, so the surface came
+out in short strips with gaps in it. It bought nothing in return: every point was still cut exactly
+once, so no material came off any earlier than it would have. Taking the depth in layers properly
+means cutting the whole path at every level with each point held no deeper than that level, so that
+what is above comes off first — a different thing, and one to build when this operation is asked to
+rough as well as to finish.
 
 The **start point**, when switched on, settles which end of the path the tool begins at: the zigzag
 is kept as it is and only its direction is decided, by whichever of its two ends is nearer the point.
@@ -315,14 +323,14 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-75 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+72 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
 operation and reads the commands that come out. `tests/test_post.py` posts a leaning path through
-the postprocessor and reads the G-code back, word by word. Without FreeCAD those twenty-seven are
-skipped and the other forty-eight still run.
+the postprocessor and reads the G-code back, word by word. Without FreeCAD those twenty-eight are
+skipped and the other forty-four still run.
 
 ## Where things are
 

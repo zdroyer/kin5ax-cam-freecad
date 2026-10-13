@@ -219,11 +219,54 @@ class TheOperation(unittest.TestCase):
         self.assertEqual(self.ROWS * (self.POINTS - 1), len(self.cuttingMoves(operation)))
 
     def test_the_operation_has_what_the_face_operation_has(self):
-        """Step down and start point, which are features and therefore pages and properties."""
+        """The start point, which is a feature and therefore a page and a property."""
         self.makeBitABallNose()
         operation = self.createOperation()
-        for name in ("StepDown", "UseStartPoint", "StartPoint"):
+        for name in ("UseStartPoint", "StartPoint"):
             self.assertTrue(hasattr(operation, name), "the operation has no %s" % name)
+
+    def test_a_row_that_falls_away_is_one_pass_and_not_a_pass_for_each_depth(self):
+        """A face that drops 20 mm across itself: the tool cuts it in one go, lifting once per row.
+
+        This is what the step down used to break. Banding the depth cut each row
+        into a piece per band, lifted the tool to the clearance height between
+        the pieces, and dropped whatever band held a single point - so a surface
+        that falls away came out as a handful of short passes with a gap in them.
+        """
+        document = self.document
+        cylinder = document.addObject("Part::Cylinder", "Cylinder")
+        cylinder.Radius = 20.0
+        cylinder.Height = 50.0
+        cylinder.Angle = 90.0
+        cylinder.Placement.Rotation = FreeCAD.Rotation(FreeCAD.Vector(1, 0, 0), 90)
+        document.recompute()
+        #a quarter cylinder lying down, rolled so that its round face rises from the side of it to
+        #the top: one face, falling away across itself, which is where banding used to show
+        round_face = [i + 1 for i, f in enumerate(cylinder.Shape.Faces)
+                      if f.Surface.TypeId == "Part::GeomCylinder"]
+        self.assertEqual(1, len(round_face), "the quarter cylinder has one round face")
+        round_face = round_face[0]
+
+        self.makeBitABallNose()
+        from kin5axcam import surface5axis
+        operation = surface5axis.Create("Surface5Axis", parentJob=self.job)
+        self.job.Proxy.addOperation(operation)
+        operation.ToolController = self.toolController
+        operation.Rows = 4
+        operation.PointsPerRow = 9
+        operation.Base = [(cylinder, ("Face%d" % round_face,))]
+        #the depths out of the way, so that what is being looked at is the passes and nothing else:
+        #where the face turns vertical the tip of a tool standing up is a radius below the surface,
+        #which the bottom of the face would otherwise clip
+        operation.setExpression("FinalDepth", None)
+        operation.FinalDepth = -10.0
+        document.recompute()
+
+        self.assertFalse("Invalid" in operation.State, operation.State)
+        plunges = [c for c in operation.Path.Commands if c.Name == "G1" and "X" not in c.Parameters]
+        self.assertEqual(4, len(plunges), "one plunge per row: every row is a single pass")
+        self.assertEqual(4 * 8, len(self.cuttingMoves(operation)),
+                         "and every point of every row is cut, none dropped with a band")
 
     def test_a_restored_document_gets_any_property_it_is_missing(self):
         """An operation saved before a property existed has to open, not break."""

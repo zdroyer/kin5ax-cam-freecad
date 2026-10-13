@@ -73,19 +73,18 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
     def opFeatures(self, obj):
         """What this operation has, which is also what the task dialog is made of.
 
-        The base geometry page comes from FeatureBaseFaces, the depths and the
-        step down from FeatureDepths and FeatureStepDown, the heights from
-        FeatureHeights, and the tool and the coolant sit on the page of the
-        operation itself.
+        The base geometry page comes from FeatureBaseFaces, the depths from
+        FeatureDepths, the heights from FeatureHeights, and the tool and the
+        coolant sit on the page of the operation itself.
 
-        Not here: FeatureFinishDepth, which is the depth of the last pass of a
-        roughing sequence. This operation follows the surface, so its last band
-        is the finish already and a separate finish depth would mean nothing.
+        Not here: FeatureStepDown and FeatureFinishDepth, which are both about
+        taking the depth in layers. This operation cuts the surface, each point
+        of it once, so there is one layer and it is the finish - see the note on
+        depths in opExecute.
         """
         return (
             PathOp.FeatureTool
             | PathOp.FeatureDepths
-            | PathOp.FeatureStepDown
             | PathOp.FeatureHeights
             | PathOp.FeatureStartPoint
             | PathOp.FeatureCoolant
@@ -333,9 +332,15 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         except ValueError as problem:
             Path.Log.error("%s: %s" % (obj.Label, problem))
             return
-        passes = pathgen.in_layers(passes, quantity_value(obj.StepDown),
-                                   quantity_value(obj.FinalDepth),
-                                   quantity_value(obj.StartDepth))
+        #The depths are a clip and nothing more, so a row of the zigzag stays the one pass it was
+        #laid out as. They used to be taken in bands of the step down as well, which chopped every
+        #row into a piece per band and lifted the tool to the clearance height between them - and
+        #bought nothing, since each point was still cut exactly once and only the order changed.
+        #Taking the depth in layers properly means cutting the whole path at each level with the
+        #depth of every point held at that level, so that what is above comes off first, and that
+        #is a different thing to build.
+        passes = pathgen.clip_to_depths(passes, quantity_value(obj.FinalDepth),
+                                        quantity_value(obj.StartDepth))
         if getattr(obj, "UseStartPoint", False):
             start = obj.StartPoint
             passes = pathgen.start_near(passes, (start.x, start.y, start.z), parameters)

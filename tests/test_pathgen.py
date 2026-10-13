@@ -437,47 +437,6 @@ class TheDepths(unittest.TestCase):
         self.assertEqual(4, len(kept[0]))
 
 
-class TheLayers(unittest.TestCase):
-    """in_layers: the depth is taken in bands from the top down, none deeper than the step down."""
-
-    def slope(self):
-        """A plane tilted so the tip of the tool runs from z = 0 at u = 0 up to z = 100 at u = 100."""
-
-        class Slope(Plane):
-            def valueAt(self, u, v):
-                return (u, v, u)
-
-            def normalAt(self, u, v):
-                return (0.0, 0.0, 1.0)
-
-        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tip_radius=3.0))
-
-    def test_a_step_down_that_covers_the_range_is_one_band(self):
-        passes = self.slope()
-        self.assertEqual([[0.0, 25.0, 50.0, 75.0, 100.0]],
-                         [[l.u for l in one] for one in pathgen.in_layers(passes, 200.0, 0.0, 100.0)])
-
-    def test_no_step_down_at_all_is_one_band(self):
-        passes = self.slope()
-        self.assertEqual(1, len(pathgen.in_layers(passes, 0.0, 0.0, 100.0)))
-
-    def test_the_bands_come_down_from_the_top_and_each_point_is_cut_once(self):
-        passes = self.slope()                       # tips at z = 0, 25, 50, 75, 100
-        layers = pathgen.in_layers(passes, 50.0, 0.0, 100.0)
-        #the top band holds what is above 50, the bottom band the rest; 50 itself is on the boundary
-        #of both and is kept by the band that reaches it first, coming down
-        points = [[l.u for l in one] for one in layers]
-        self.assertEqual([[50.0, 75.0, 100.0], [0.0, 25.0, 50.0]], points)
-        self.assertEqual([0.0, 25.0, 50.0, 50.0, 75.0, 100.0],
-                         sorted(u for one in points for u in one))
-
-    def test_a_band_with_too_little_in_it_is_dropped_like_any_other_pass(self):
-        passes = self.slope()
-        layers = pathgen.in_layers(passes, 10.0, 0.0, 100.0)
-        for one in layers:
-            self.assertGreaterEqual(len(one), 2)
-
-
 class TheStartPoint(unittest.TestCase):
     """start_near: which end of the path the tool begins at."""
 

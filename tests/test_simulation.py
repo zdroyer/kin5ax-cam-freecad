@@ -197,5 +197,88 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertEqual(count, self.simulation.StepCount, "the one active operation either way")
 
 
+@needs_everything
+class AJobWithNoMachine(unittest.TestCase):
+    """The leaning path played as it is: the tool at every location in the frame of the part, the
+    stock cut, nothing solved and no machine file anywhere."""
+
+    LENGTH, WIDTH, HEIGHT = 100.0, 50.0, 10.0
+    DIAMETER = 6.0
+
+    def setUp(self):
+        import Path.Main.Job as PathJob
+
+        from tests.test_freecad import top_face_name
+        from kin5axcam import simulation, surface5axis
+
+        self.document = FreeCAD.newDocument("kin5axcam_free")
+        self.box = self.document.addObject("Part::Box", "Box")
+        self.box.Length, self.box.Width, self.box.Height = self.LENGTH, self.WIDTH, self.HEIGHT
+        self.document.recompute()
+        self.job = PathJob.Create("Job", [self.box])
+        self.document.recompute()
+        controller = self.job.Tools.Group[0]
+        controller.Tool.ShapeType = "Ballend"
+        controller.Tool.Diameter = self.DIAMETER
+        self.document.recompute()
+        self.operation = surface5axis.Create("Surface5Axis", parentJob=self.job)
+        self.job.Proxy.addOperation(self.operation)
+        self.operation.ToolController = controller
+        self.operation.Rows = 2
+        self.operation.PointsPerRow = 3
+        self.operation.Base = [(self.box, (top_face_name(self.box.Shape),))]
+        self.operation.ToolAxis = "Normal"
+        self.operation.LeanAngle = 30.0
+        self.document.recompute()
+        self.simulation = simulation.Create("Simulation", None, self.job, self.document)
+        self.document.recompute()
+
+    def tearDown(self):
+        FreeCAD.closeDocument(self.document.Name)
+
+    def test_the_path_is_the_trajectory_made_dense_by_the_library(self):
+        sim = self.simulation
+        self.assertIsNone(sim.Machine)
+        self.assertGreater(sim.StepCount, 100, "as dense as the voxels")
+        self.assertEqual(3 * sim.StepCount, len(sim.Axes))
+        self.assertTrue(all(sim.Solved))
+        self.assertEqual([], list(sim.Joints), "nothing solved")
+        self.assertIn("locations of the path", sim.Report)
+        self.assertEqual([], sim.Workpiece, "the model and the stock are where they are already")
+
+    def test_the_tool_stands_at_the_tip_leaning_along_the_axis(self):
+        from kin5axcam import solve
+
+        sim = self.simulation
+        sim.Step = sim.StepCount - 1
+        frame = sim.ToolFrame
+        self.assertIsNotNone(frame)
+        self.assertIn(sim.Tool, frame.Group)
+        last = solve.moves_of(self.operation)[-1]
+        z = frame.Placement.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        for i in range(3):
+            self.assertAlmostEqual(last.axis[i], z[i], delta=1e-9, msg="the frame's Z is the tool axis")
+        model = solve.tool_model_of(self.operation, sim.Proxy.options(sim))
+        tip = frame.Placement.multVec(FreeCAD.Vector(0, 0, -model.assembly_length_mm))
+        for i in range(3):
+            self.assertAlmostEqual(last.point[i], tip[i], delta=1e-6, msg="and the tip is on the path")
+
+    def test_the_stock_is_cut_in_the_frame_of_the_part(self):
+        sim = self.simulation
+        self.assertIsNotNone(sim.Cloud)
+        self.assertIn(sim.Cloud, sim.PartFrame.Group)
+        self.assertEqual(FreeCAD.Vector(0, 0, 0), sim.PartFrame.Placement.Base)
+        sim.Step = sim.StepCount - 1
+        self.assertGreater(sim.RemovedVolume, 0.0)
+        self.assertLess(sim.RemovedVolume, 0.5 * self.job.Stock.Shape.Volume)
+        self.assertEqual(0, sim.Gouges)
+        middle = sim.StepCount // 2
+        sim.Step = middle
+        forwards = sim.RemovedVolume
+        sim.Step = sim.StepCount - 1
+        sim.Step = middle
+        self.assertAlmostEqual(forwards, sim.RemovedVolume, delta=1e-9)
+
+
 if __name__ == "__main__":
     unittest.main()

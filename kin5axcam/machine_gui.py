@@ -113,8 +113,9 @@ class CommandSimulate(object):
             "Pixmap": icon("Kin5axSimulate"),
             "MenuText": QT_TRANSLATE_NOOP("CAM_Kin5axSimulate", "Simulate on the machine"),
             "ToolTip": QT_TRANSLATE_NOOP("CAM_Kin5axSimulate",
-                                         "Solve the operations of the job for the machine of kin5ax in "
-                                         "the document and step the machine through them"),
+                                         "Cut the stock with the operations of the job, the tool leaning "
+                                         "as they say - on the machine of kin5ax in the document when "
+                                         "there is one, else on the path as it is"),
         }
 
     def IsActive(self):
@@ -128,9 +129,15 @@ class CommandSimulate(object):
             sim = existing[0]
         else:
             job = the_one(jobs_of(document), selected, translate("Kin5axMachine", "job"))
-            machine_object = the_one(machines_of(document), selected, translate("Kin5axMachine", "machine"))
-            if job is None or machine_object is None:
+            if job is None:
                 return
+            #a machine when there is one; none, and the path is played as it is, the tool leaning
+            machines = machines_of(document)
+            machine_object = None
+            if machines:
+                machine_object = the_one(machines, selected, translate("Kin5axMachine", "machine"))
+                if machine_object is None:
+                    return
             reuse = [s for s in simulations_of(document) if s.Job == job and s.Machine == machine_object]
             sim = reuse[0] if reuse else None
             if sim is None:
@@ -215,14 +222,20 @@ class Player(object):
         sim = self.simulation
         count = sim.StepCount
         step = self.slider.value()
-        machine_name = sim.Machine.Label if sim.Machine is not None else "?"
+        machine_name = sim.Machine.Label if sim.Machine is not None else translate(
+            "Kin5axMachine", "the path as it is")
         self.title.setText(translate("Kin5axMachine", "%s on %s: %d locations")
                            % (sim.Job.Label if sim.Job is not None else "?", machine_name, count))
         if count == 0:
             self.where.setText(translate("Kin5axMachine", "nothing to show"))
             return
         solved = sim.Solved[step] if step < len(sim.Solved) else 0
-        if solved:
+        if solved and sim.Machine is None:
+            tip = sim.Tips[3 * step:3 * step + 3]
+            axis = sim.Axes[3 * step:3 * step + 3]
+            text = translate("Kin5axMachine", "location %d of %d: tip %s, axis %s") % (
+                step + 1, count, " ".join("%.3f" % v for v in tip), " ".join("%.3f" % v for v in axis))
+        elif solved:
             q = sim.Joints[5 * step:5 * step + 5]
             text = translate("Kin5axMachine", "location %d of %d: %s") % (
                 step + 1, count, "  ".join("%.3f" % v for v in q))

@@ -13,6 +13,12 @@ player of the task panel moves ``Step`` - the picture. Both run on
 ``kin5axcam.solve``, as the postprocessor does, so what is seen here is what is
 written there.
 
+With no machine - ``Machine`` left empty - there is nothing to solve: the path
+itself is the trajectory, made as dense as the voxels by the library, and the
+tool is drawn in the frame of the part at the tip and the axis of each
+location, leaning the way the operation said. This is the cutting simulation
+FreeCAD's own cannot do, and it needs no machine file at all.
+
 With ``Cut`` on, the stock of the job becomes a block of voxels in the library
 and every step cuts it: the surface of what is left is a point cloud in the
 frame of the material, the removed volume and the gouges - the shank or the
@@ -41,7 +47,9 @@ class ObjectSimulation(object):
 
     def __init__(self, obj, machine_object, job):
         obj.Proxy = self
-        obj.addProperty("App::PropertyLink", "Machine", PROPERTY_GROUP, "The machine the job runs on")
+        obj.addProperty("App::PropertyLink", "Machine", PROPERTY_GROUP,
+                        "The machine the job runs on; none, and the path is played as it is, the tool "
+                        "leaning in the frame of the part")
         obj.addProperty("App::PropertyLink", "Job", PROPERTY_GROUP, "The job whose operations are run")
         obj.addProperty("App::PropertyLinkList", "Operations", PROPERTY_GROUP,
                         "The operations run, in this order; none means every active operation of the job")
@@ -75,6 +83,12 @@ class ObjectSimulation(object):
                         "The status of kin5ax for every location")
         obj.addProperty("App::PropertyFloatList", "Tips", PROPERTY_GROUP,
                         "Where the tip of the tool was asked to be, three values per location, mm")
+        obj.addProperty("App::PropertyFloatList", "Axes", PROPERTY_GROUP,
+                        "Which way the tool was asked to point, three values per location")
+        obj.addProperty("App::PropertyLink", "ToolFrame", PROPERTY_GROUP,
+                        "Without a machine: the part the tool hangs from, placed at every location")
+        obj.addProperty("App::PropertyLink", "PartFrame", PROPERTY_GROUP,
+                        "Without a machine: the part holding what is left of the stock and the markers")
         obj.addProperty("App::PropertyIntegerList", "StepOperations", PROPERTY_GROUP,
                         "The index into Operations of the operation every location belongs to")
         obj.addProperty("App::PropertyString", "Report", PROPERTY_GROUP,
@@ -102,9 +116,9 @@ class ObjectSimulation(object):
                         "The surface of what is left of the stock, as points")
         obj.addProperty("App::PropertyLink", "GougeMarker", PROPERTY_GROUP,
                         "The marker of the first gouge")
-        for name in ("StepCount", "Joints", "Solved", "Statuses", "Tips", "StepOperations", "Report",
-                     "Tool", "Holder", "Workpiece", "Unreachable", "RemovedVolume", "Gouges",
-                     "FirstGouge", "Cloud", "GougeMarker"):
+        for name in ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
+                     "Report", "Tool", "Holder", "Workpiece", "Unreachable", "RemovedVolume", "Gouges",
+                     "FirstGouge", "Cloud", "GougeMarker", "ToolFrame", "PartFrame"):
             obj.setEditorMode(name, 1)
         obj.Cut = True
         obj.VoxelSize = 0.0
@@ -154,9 +168,35 @@ class ObjectSimulation(object):
             return []
         return [op for op in job.Operations.Group if getattr(op, "Active", True)]
 
-    def options(self, obj):
+    def unit(self, obj):
+        """Millimetres per length unit of the picture: the chain file's, or 1 when there is no machine."""
         machine_object = obj.Machine
-        unit = machine_object.UnitInMillimetres if machine_object is not None else 1000.0
+        return machine_object.UnitInMillimetres if machine_object is not None else 1.0
+
+    def toolHolderPart(self, obj):
+        """The part the tool hangs from: the tool mount of the machine, or a frame of this object's own."""
+        if obj.Machine is not None:
+            return obj.Machine.ToolMount
+        frame = obj.ToolFrame
+        if frame is None:
+            frame = obj.Document.addObject("App::Part", obj.Name + "ToolFrame")
+            frame.Label = "Tool"
+            obj.ToolFrame = frame
+        return frame
+
+    def materialPart(self, obj):
+        """The part in the frame of the material: the machine's, or the frame of the part itself."""
+        if obj.Machine is not None:
+            return obj.Machine.Material
+        frame = obj.PartFrame
+        if frame is None:
+            frame = obj.Document.addObject("App::Part", obj.Name + "PartFrame")
+            frame.Label = "Stock on the path"
+            obj.PartFrame = frame
+        return frame
+
+    def options(self, obj):
+        unit = self.unit(obj)
         max_step = _quantity(obj.MaxStep) or None
         if max_step is None and getattr(obj, "Cut", False) and self.stockBox(obj) is not None:
             #a cut is a stamp per location, so the locations have to be as dense as the voxels
@@ -196,13 +236,13 @@ class ObjectSimulation(object):
 
     def execute(self, obj):
         """Solves every operation on the machine and keeps the trajectory in the properties."""
+        if obj.Job is None:
+            raise ValueError("the simulation needs a job")
         machine_object = obj.Machine
-        if machine_object is None or obj.Job is None:
-            raise ValueError("the simulation needs a machine and a job")
-        chain = machine_object.Proxy.chain(machine_object)
+        chain = machine_object.Proxy.chain(machine_object) if machine_object is not None else None
         options = self.options(obj)
         self.forgetCut()
-        joints, solved, statuses, tips, operations_of_steps = [], [], [], [], []
+        joints, solved, statuses, tips, axes, operations_of_steps = [], [], [], [], [], []
         reports = []
         runs = []
         for index, operation in enumerate(self.operations(obj)):
@@ -210,21 +250,37 @@ class ObjectSimulation(object):
             if not moves:
                 continue
             model = solve.tool_model_of(operation, options)
-            trajectory = solve.solve(chain, moves, model, options, keep=obj.Cut)
             first = len(solved)
-            for step in trajectory.steps:
-                joints.extend(step.q if step.solved else [0.0] * kin5ax.AXES)
-                solved.append(1 if step.solved else 0)
-                statuses.append(step.status)
-                tips.extend(step.move.point)
-                operations_of_steps.append(index)
-            runs.append((first, len(solved), trajectory))
-            reports.append("%s: %s" % (operation.Label, trajectory.describe()))
+            if chain is not None:
+                trajectory = solve.solve(chain, moves, model, options, keep=obj.Cut)
+                for step in trajectory.steps:
+                    joints.extend(step.q if step.solved else [0.0] * kin5ax.AXES)
+                    solved.append(1 if step.solved else 0)
+                    statuses.append(step.status)
+                    tips.extend(step.move.point)
+                    axes.extend(step.move.axis)
+                    operations_of_steps.append(index)
+                runs.append((first, len(solved), trajectory))
+                reports.append("%s: %s" % (operation.Label, trajectory.describe()))
+            else:
+                #no machine: the path is the trajectory, made dense by the library, every location of
+                #it reachable by definition
+                dense = self.densify(obj, moves, model, options)
+                for point, axis in dense:
+                    solved.append(1)
+                    statuses.append(kin5ax.SOLVED)
+                    tips.extend(point)
+                    axes.extend(axis)
+                    operations_of_steps.append(index)
+                runs.append((first, len(solved), (moves, model)))
+                reports.append("%s: %d locations of the path, %d with those invented between"
+                               % (operation.Label, len(moves), len(dense)))
         self._runs = runs
         obj.Joints = joints
         obj.Solved = solved
         obj.Statuses = statuses
         obj.Tips = tips
+        obj.Axes = axes
         obj.StepOperations = operations_of_steps
         obj.StepCount = len(solved)
         obj.Report = "\n".join(reports) if reports else "nothing to run"
@@ -236,8 +292,41 @@ class ObjectSimulation(object):
         self.prepareCut(obj)
         self.pose(obj)
 
+    def densify(self, obj, moves, model, options):
+        """The moves made as dense as the voxels, by the library: a list of (tip, axis) in mm.
+
+        The library densifies programmed points, so a ball nose tool's path goes
+        over as ball centres and comes back as tips - the same shift the solve
+        makes, and nothing invented in Python.
+        """
+        tool = model.to_kin5ax(1.0) if model is not None else None
+        if tool is None:
+            raise ValueError("there is no tool to cut with: pick a tool controller")
+        try:
+            with kin5ax.Material((1.0, 1.0, 1.0), 1.0, (0.0, 0.0, 0.0)) as nothing:
+                with kin5ax.Simulation.from_locations(
+                        tool, options.settings(),
+                        [model.programmed_point(m.point, m.axis) for m in moves],
+                        [m.axis for m in moves], nothing) as dense:
+                    lift = model.radius_mm if model.ball_nosed else 0.0
+                    out = []
+                    for position, axis, _, _ in dense.locations():
+                        out.append((tuple(position[i] - lift * axis[i] for i in range(3)), tuple(axis)))
+                    return out
+        finally:
+            tool.close()
+
     def placeWorkpiece(self, obj):
-        """Links to the model and the stock of the job, in the part of the machine's material frame."""
+        """Links to the model and the stock of the job, in the part of the material frame.
+
+        Without a machine the frame of the part is the frame of the document,
+        where the model and the stock sit already: nothing to link.
+        """
+        if obj.Machine is None:
+            for stale in obj.Workpiece:
+                obj.Document.removeObject(stale.Name)
+            obj.Workpiece = []
+            return
         material = obj.Machine.Material
         wanted = []
         job = obj.Job
@@ -277,7 +366,7 @@ class ObjectSimulation(object):
         if marker is None:
             marker = obj.Document.addObject("Part::Feature", obj.Name + "Unreachable")
             marker.Label = "Unreachable locations"
-            obj.Machine.Material.addObject(marker)
+            self.materialPart(obj).addObject(marker)
             view = getattr(marker, "ViewObject", None)
             if view is not None:
                 view.PointColor = (1.0, 0.0, 0.0)
@@ -290,13 +379,18 @@ class ObjectSimulation(object):
     def forgetCut(self):
         """Releases what the library holds for the cut: the simulations, the block, the paths."""
         for cut in (self._cuts or []):
-            cut.close()
+            if cut is not None:
+                tool = getattr(cut, "tool", None)
+                cut.close()
+                if tool is not None and cut.chain is None:
+                    tool.close()
         self._cuts = None
         if self._block is not None:
             self._block.close()
             self._block = None
         for _, _, trajectory in (self._runs or []):
-            trajectory.close()
+            if hasattr(trajectory, "close"):
+                trajectory.close()
         self._runs = None
         self._cut_to = -1
         self._cut_since_refresh = 0
@@ -313,7 +407,7 @@ class ObjectSimulation(object):
             obj.Report = obj.Report + "\nno stock in the job to cut"
             self.removeCloud(obj)
             return
-        unit = obj.Machine.UnitInMillimetres
+        unit = self.unit(obj)
         voxel = self.voxelSize(obj)
         try:
             self._block = kin5ax.Material(
@@ -324,13 +418,23 @@ class ObjectSimulation(object):
             self._block = None
             self.removeCloud(obj)
             return
-        chain = obj.Machine.Proxy.chain(obj.Machine)
         self._cuts = []
-        for _, _, trajectory in self._runs:
-            if trajectory.path is None or trajectory.tool is None:
-                self._cuts.append(None)
-                continue
-            self._cuts.append(kin5ax.Simulation(chain, trajectory.tool, trajectory.path, self._block))
+        if obj.Machine is not None:
+            chain = obj.Machine.Proxy.chain(obj.Machine)
+            for _, _, trajectory in self._runs:
+                if trajectory.path is None or trajectory.tool is None:
+                    self._cuts.append(None)
+                    continue
+                self._cuts.append(kin5ax.Simulation(chain, trajectory.tool, trajectory.path, self._block))
+        else:
+            options = self.options(obj)
+            for _, _, (moves, model) in self._runs:
+                tool = model.to_kin5ax(1.0)
+                cut = kin5ax.Simulation.from_locations(
+                    tool, options.settings(), [model.programmed_point(m.point, m.axis) for m in moves],
+                    [m.axis for m in moves], self._block)
+                cut.tool = tool             #kept alive with the simulation, closed with it
+                self._cuts.append(cut)
         self._cut_to = -1
         self.refreshCloud(obj)
 
@@ -364,7 +468,7 @@ class ObjectSimulation(object):
             #it reports is of locations passed, the way it is here
         self._cut_to = step
         self._cut_since_refresh += advanced
-        unit = obj.Machine.UnitInMillimetres
+        unit = self.unit(obj)
         total, removed = self._block.volumes()
         obj.RemovedVolume = removed * unit ** 3
         gouges, first_point = 0, None
@@ -390,7 +494,7 @@ class ObjectSimulation(object):
 
         if self._block is None:
             return
-        unit = obj.Machine.UnitInMillimetres
+        unit = self.unit(obj)
         half = 0.5 * self._block.voxel * unit
         surface = self._block.surface()
         points = [FreeCAD.Vector(surface[3 * i] * unit + half, surface[3 * i + 1] * unit + half,
@@ -399,7 +503,7 @@ class ObjectSimulation(object):
         if cloud is None:
             cloud = obj.Document.addObject("Points::Feature", obj.Name + "Cloud")
             cloud.Label = "What is left of the stock"
-            obj.Machine.Material.addObject(cloud)
+            self.materialPart(obj).addObject(cloud)
             obj.Cloud = cloud
             view = getattr(cloud, "ViewObject", None)
             if view is not None:
@@ -429,7 +533,7 @@ class ObjectSimulation(object):
         if marker is None:
             marker = obj.Document.addObject("Part::Feature", obj.Name + "Gouge")
             marker.Label = "First gouge"
-            obj.Machine.Material.addObject(marker)
+            self.materialPart(obj).addObject(marker)
             view = getattr(marker, "ViewObject", None)
             if view is not None:
                 view.PointColor = (1.0, 0.3, 0.0)
@@ -445,17 +549,42 @@ class ObjectSimulation(object):
         return list(obj.Joints[kin5ax.AXES * step:kin5ax.AXES * (step + 1)])
 
     def pose(self, obj):
-        """The machine at the configuration of the step, with the tool of the step's operation in it."""
-        machine_object = obj.Machine
-        if machine_object is None or obj.StepCount == 0:
+        """The machine at the configuration of the step - or, without one, the tool at its location."""
+        if obj.StepCount == 0:
             return
         step = max(0, min(obj.Step, obj.StepCount - 1))
         self.showTool(obj, obj.StepOperations[step])
-        q = self.configurationAt(obj, step)
-        if q is not None:
-            machine_object.Configuration = q
+        machine_object = obj.Machine
+        if machine_object is not None:
+            q = self.configurationAt(obj, step)
+            if q is not None:
+                machine_object.Configuration = q
+        else:
+            self.placeToolFrame(obj, step)
         if obj.Cut:
             self.cutTo(obj, step)
+
+    def placeToolFrame(self, obj, step):
+        """The tool frame at the tip and the axis of the step: Z along the axis, the mount up it.
+
+        The tool and the holder hang below the origin of the frame by the length
+        of the assembly, as they do from a machine's mount, so the frame goes
+        where the mount would be: the tip plus the assembly along the axis.
+        """
+        tip = FreeCAD.Vector(obj.Tips[3 * step], obj.Tips[3 * step + 1], obj.Tips[3 * step + 2])
+        axis = FreeCAD.Vector(obj.Axes[3 * step], obj.Axes[3 * step + 1], obj.Axes[3 * step + 2])
+        if axis.Length < 1e-12:
+            axis = FreeCAD.Vector(0, 0, 1)
+        axis.normalize()
+        operations = self.operations(obj)
+        index = obj.StepOperations[step]
+        hang = 0.0
+        if index < len(operations):
+            model = solve.tool_model_of(operations[index], self.options(obj))
+            if model is not None:
+                hang = model.assembly_length_mm
+        frame = self.toolHolderPart(obj)
+        frame.Placement = FreeCAD.Placement(tip + axis * hang, FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), axis))
 
     def showTool(self, obj, operation_index):
         """The tool of that operation at the mount: the bit's own solid when it has one, else a cylinder."""
@@ -471,7 +600,7 @@ class ObjectSimulation(object):
         model = solve.tool_model_of(operation, options)
         if model is None:
             return
-        mount = obj.Machine.ToolMount
+        mount = self.toolHolderPart(obj)
         tool = obj.Tool
         if tool is None:
             tool = obj.Document.addObject("Part::Feature", obj.Name + "Tool")

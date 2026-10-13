@@ -257,6 +257,16 @@ Properties worth knowing: `Operations` (none means every active operation of the
 the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and
 `Start`. The unit of the chain file is on the machine, `UnitInMillimetres`.
 
+**With no machine at all.** Leave `Machine` empty — the simulate command does, when the document has
+no machine — and there is nothing to solve: the path itself is the trajectory, made as dense as the
+voxels **by the library** (`k5_simulation_create_from_locations`, the same interpolation the solver
+uses between two locations of a file), and the tool is drawn at the tip and the axis of every
+location in the frame of the part, leaning the way the operation said. The stock is cut the same
+way, in the frame of the part, and the player shows tip and axis instead of joint values. This is the
+five-axis cutting simulation FreeCAD's own cannot do, and it needs no machine file: the question it
+answers — *does this path, with the tool leaning like this, cut what I meant?* — comes before the
+question of which machine.
+
 **The cut.** With `Cut` on — it is, by default — the stock of the job becomes a block of voxels in
 the library, in the frame of the material, and every step cuts it with the tool of the step's
 operation: the ball or the flat end takes material off, and anything the shank or the holder meets
@@ -432,7 +442,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-121 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+126 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
@@ -445,9 +455,9 @@ the last move. `tests/test_kin5ax.py` checks the binding against the same oracle
 `tests/test_machine.py` and `tests/test_simulation.py` close the loop over the document: at the
 last step the tool hanging from the mount part puts its ball centre, in the frame of the material
 part, where the last move asked — and the stock has less volume after the path than before it, the
-same amount whether a step is reached forwards or after going back. Without FreeCAD fifty-four are
-skipped and the other sixty-seven still run; the ones that need the shared library skip when it is
-not built.
+same amount whether a step is reached forwards or after going back — on a machine and without one.
+Without FreeCAD fifty-seven are skipped and the other sixty-nine still run; the ones that need the
+shared library skip when it is not built.
 
 ## Where things are
 

@@ -383,8 +383,15 @@ def _declare(lib):
     lib.k5_simulation_create.restype = ctypes.c_int
     lib.k5_simulation_create.argtypes = [_chain_t, _tool_t, _path_t, _material_t,
                                          ctypes.POINTER(_simulation_t)]
+    lib.k5_simulation_create_from_locations.restype = ctypes.c_int
+    lib.k5_simulation_create_from_locations.argtypes = [_tool_t, ctypes.POINTER(Settings), _double_p,
+                                                        _double_p, ctypes.c_size_t, _material_t,
+                                                        ctypes.POINTER(_simulation_t)]
     lib.k5_simulation_free.restype = None
     lib.k5_simulation_free.argtypes = [_simulation_t]
+    lib.k5_simulation_location.restype = ctypes.c_int
+    lib.k5_simulation_location.argtypes = [_simulation_t, ctypes.c_size_t, _double_p, _double_p, _size_p,
+                                           _int_p]
     lib.k5_simulation_reset.restype = ctypes.c_int
     lib.k5_simulation_reset.argtypes = [_simulation_t]
     lib.k5_simulation_step.restype = ctypes.c_int
@@ -823,20 +830,68 @@ class Material(object):
 
 
 class Simulation(object):
-    """The path cutting the material with the tool on the chain, one location at a time.
+    """The path cutting the material with the tool, one location at a time.
 
-    The four are kept here for as long as the simulation lives, since the
-    library expects the caller to keep them alive; the chain's joint values and
-    the tool's position are changed by every step.
+    On a chain, over a solved path: the chain takes the configuration of each
+    location and the tool follows its tool frame. Or with no chain at all,
+    through from_locations(): the path as programmed points and tool axes in
+    the frame of the material, made as dense as the settings ask by the
+    library, and the tool put at each of them.
+
+    What the simulation was made of is kept here for as long as it lives, since
+    the library expects the caller to keep it alive; the chain's joint values
+    and the tool's position are changed by every step.
     """
 
     def __init__(self, chain, tool, path, material, library=None):
         self._lib = load(library)
         self._handle = _simulation_t()
         self.chain, self.tool, self.path, self.material = chain, tool, path, material
-        _check(self._lib, self._lib.k5_simulation_create(
-            chain.handle, tool.handle, path._handle, material.handle, ctypes.byref(self._handle)),
-            "k5_simulation_create")
+        if chain is not None:
+            _check(self._lib, self._lib.k5_simulation_create(
+                chain.handle, tool.handle, path._handle, material.handle, ctypes.byref(self._handle)),
+                "k5_simulation_create")
+
+    @classmethod
+    def from_locations(cls, tool, settings, positions, axes, material, library=None):
+        """A simulation with no chain: positions and axes are sequences of 3-sequences, in the unit of the material.
+
+        The path is made dense by the library - interpolate, max_position_difference
+        and max_orientation_difference_degrees of the settings - and location()
+        reads the dense path back. An axis of length zero is refused.
+        """
+        positions = list(positions)
+        axes = list(axes)
+        if len(positions) != len(axes):
+            raise Kin5axError(ERROR_ARGUMENT, "%d positions and %d axes: a path needs one of each per "
+                              "location" % (len(positions), len(axes)))
+        count = len(positions)
+        flat_positions = _doubles([c for p in positions for c in p], 3 * count, "positions")
+        flat_axes = _doubles([c for a in axes for c in a], 3 * count, "axes")
+        simulation = cls(None, tool, None, material, library)
+        _check(simulation._lib, simulation._lib.k5_simulation_create_from_locations(
+            tool.handle, ctypes.byref(settings), flat_positions if count else None,
+            flat_axes if count else None, count, material.handle, ctypes.byref(simulation._handle)),
+            "k5_simulation_create_from_locations")
+        return simulation
+
+    def location(self, index):
+        """The location of that index of what the steps walk: (position, axis, source, invented).
+
+        source is the index of the location of the path it was made from - its
+        own, or for one invented on the way to the next, the one before it.
+        """
+        position = (ctypes.c_double * 3)()
+        axis = (ctypes.c_double * 3)()
+        source, invented = ctypes.c_size_t(), ctypes.c_int()
+        _check(self._lib, self._lib.k5_simulation_location(self._handle, int(index), position, axis,
+                                                           ctypes.byref(source), ctypes.byref(invented)),
+               "k5_simulation_location")
+        return tuple(position), tuple(axis), source.value, bool(invented.value)
+
+    def locations(self):
+        for index in range(self.progress()[1]):
+            yield self.location(index)
 
     def reset(self):
         """Back to the first location; the material is left as it is."""

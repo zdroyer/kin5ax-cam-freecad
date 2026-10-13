@@ -306,6 +306,71 @@ class TheCutting(unittest.TestCase):
         with self.assertRaises(kin5ax.Kin5axError):
             kin5ax.Material((1.0, 1.0, 1.0), 1e-6, (0.0, 0.0, 0.0))
 
+    def test_a_leaning_ball_cuts_with_no_machine_at_all(self):
+        """The path as it is - points and axes - made dense by the library and cut: a groove one
+        radius deep under it, since the lowest point of a ball does not care where the shank points."""
+        radius = 0.016
+        lean = math.radians(30.0)
+        axis = (math.sin(lean), 0.0, math.cos(lean))
+        settings = kin5ax.Settings.default()
+        settings.max_position_difference = 0.002        #as dense as the voxels
+        block = kin5ax.Material((0.12, 0.06, 0.03), 0.002, (-0.06, -0.03, -0.03))
+        cutting = kin5ax.Simulation.from_locations(self.tool, settings, [(-0.04, 0.0, 0.0), (0.04, 0.0, 0.0)],
+                                                   [axis, axis], block)
+        index, count, finished = cutting.progress()
+        self.assertEqual(41, count, "80 mm in 2 mm steps, and the first location")
+        position, direction, source, invented = cutting.location(1)
+        self.assertAlmostEqual(-0.038, position[0], delta=1e-9)
+        self.assertAlmostEqual(axis[0], direction[0], delta=1e-9)
+        self.assertEqual((0, True), (source, invented))
+        self.assertEqual((1, False), cutting.location(40)[2:])
+        self.assertEqual(41, len(list(cutting.locations())))
+        with self.assertRaises(kin5ax.Kin5axError):
+            cutting.location(41)
+
+        cutting.run()
+        self.assertTrue(cutting.progress()[2])
+        surface = block.surface()
+        under, beside = -1.0, -1.0
+        for i in range(len(surface) // 3):
+            x, y, z = surface[3 * i], surface[3 * i + 1], surface[3 * i + 2]
+            if abs(x) > 0.03:
+                continue
+            if abs(y) < 0.001:
+                under = max(under, z)
+            if abs(y - 0.025) < 0.0015:
+                beside = max(beside, z)
+        self.assertLess(under, -0.5 * radius, "a groove under the path")
+        self.assertGreater(under, -radius - 0.004, "one radius deep, lean or no lean")
+        self.assertGreater(beside, -0.004, "and nothing taken off beside it")
+        self.assertEqual(0, cutting.gouges()[0], "the shank leans away above the block")
+        cutting.close()
+
+        with self.assertRaises(kin5ax.Kin5axError) as caught:
+            kin5ax.Simulation.from_locations(self.tool, settings, [(0, 0, 0), (1, 0, 0)],
+                                             [(0, 0, 1), (0, 0, 0)], block)
+        self.assertIn("2", caught.exception.message)
+        empty = kin5ax.Simulation.from_locations(self.tool, settings, [], [], block)
+        self.assertEqual((0, 0, True), empty.progress())
+        empty.close()
+        block.close()
+
+    def test_the_locations_of_a_simulation_on_a_chain_are_its_tool_points(self):
+        q = q_inside_limits(self.chain)
+        p, v = self.chain.tool_point(q, self.tool)
+        settings = kin5ax.Settings.default()
+        settings.check_collisions = 0
+        path = self.chain.postprocess_locations([p], [v], settings, self.tool)
+        block = kin5ax.Material((0.1, 0.1, 0.05), 0.005, (-0.05, -0.05, -0.2))
+        with kin5ax.Simulation(self.chain, self.tool, path, block) as cutting:
+            position, axis, source, invented = cutting.location(0)
+            for i in range(3):
+                self.assertAlmostEqual(p[i], position[i], delta=1e-9)
+                self.assertAlmostEqual(v[i], axis[i], delta=1e-9)
+            self.assertEqual((0, False), (source, invented))
+        block.close()
+        path.close()
+
     def test_the_ball_cuts_a_groove_under_the_path_and_nowhere_else(self):
         radius = 0.016
         settings = kin5ax.Settings.default()

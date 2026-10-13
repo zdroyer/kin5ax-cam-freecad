@@ -10,11 +10,13 @@ with **any shape of tool**. It is the toolpath source for the five-axis postproc
 | `Normal` | along the surface normal, leaned over by `LeanAngle` towards `LeanRotation` | `G1 X.. Y.. Z.. I.. J.. K..` |
 
 `I J K` is the vector output convention: the axis of the tool as a unit vector in the coordinates of
-the part, which is what kin5ax solves for. A move without them is a move of a tool standing up, so
-a `Vertical` path is readable by anything that reads G-code — including FreeCAD's own simulator and
-postprocessors, **none of which know what to do with `I J K`**. They ignore the orientation and draw
-or post the tip positions alone, which is a three-axis reading of a five-axis path: right about where
-the tip goes, silent about how the tool got there. The postprocessor is the next thing to build.
+the part, which is what kin5ax solves for. A move without them is a move of a tool standing up, so a
+`Vertical` path is readable by anything that reads G-code.
+
+What reads the vector is the postprocessor below. FreeCAD's **simulator** never will: it places the
+tool with a fixed upright rotation (`Path/Main/Gui/SimulatorGL.py`), so a leaning path is drawn and
+simulated as if the tool stood up. Nothing the operation emits can tip it; that view comes with the
+kin5ax machine simulation.
 
 ## The point the path carries
 
@@ -119,6 +121,45 @@ It also **warns** when the tool is not a ball nose one. The sphere at the end of
 knows of the shape — the sides and the flat of an end mill, the shank above the corner of a bull nose
 one, the cone of a V bit are nowhere in the arithmetic — so the path is right for a ball nose tool
 and an approximation for every other. The warning is in the report view, with the path.
+
+## The postprocessor
+
+`post/fanuc_tcp_kin5ax_post.py` — FreeCAD's own `fanuc_post` with three things changed. Install it
+with:
+
+```python
+from kin5axcam import postinstall
+postinstall.install()
+```
+
+which copies it into the macro folder, one of the few folders FreeCAD looks for postprocessors in —
+an addon cannot add a folder of its own to that list. Restart, and *fanuc_tcp_kin5ax* is in the
+**Post Processor** list of the job. Run it again after updating the addon, since it is a copy.
+
+**`K` is output.** The parameter list of the stock Fanuc post is `X Y Z A B C I J F S T Q R L H D P`
+— no `K`, so the third component of every tool axis vector was dropped on the way out and the
+orientation left half written. `I-0.534 J0.307` and nothing else is a vector whose `K` can only be
+recovered by assuming the tool points upwards. `grbl`, `heidenhain`, `marlin`, `rrf` and
+`dynapath_4060` keep `K`; `fanuc`, `linuxcnc`, `mach3_mach4`, `centroid` and `dynapath` drop it.
+
+**`I J K` are directions on a linear move.** On `G2`/`G3` they are the centre of an arc, a length,
+converted into the units of the output as before. On `G0`/`G1` they are the tool axis, a direction:
+written as they are, with no unit conversion — in an inch program the stock post would have divided
+the vector by 25.4 — and written on every move, never suppressed for repeating the value before, a
+thing a direction has every right to do. Six digits by default, `--vector-precision` to change it.
+
+**Tool centre point control is switched on round an operation that has a vector**: `G43.5 H<tool>`,
+which is the Fanuc mode where the tool axis is commanded by `I J K`, and `G49` afterwards.
+`--no-tcp` leaves them out, `--tcp-command` and `--tcp-cancel` say them differently. A three-axis
+operation is posted exactly as the stock post posts it.
+
+Mind that **`G49` cancels the tool length offset** along with the mode, so an operation that follows
+a five-axis one, on the same tool, needs its offset set up again. The post says so in a comment where
+it cancels. A tilted working plane — `G68.2` and the rest — is later work.
+
+The file keeps the licence it came from, **LGPL-2.1-or-later**, not the MIT of the rest of kin5ax,
+and keeps its FreeCAD copyright lines. Being a copy rather than a rewrite means a fix to FreeCAD's
+Fanuc post can be brought over by reading the difference between the two files.
 
 ## Installing it
 
@@ -274,13 +315,14 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-64 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+75 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
-operation and reads the commands that come out. Without FreeCAD those nineteen are skipped and the
-other forty-five still run.
+operation and reads the commands that come out. `tests/test_post.py` posts a leaning path through
+the postprocessor and reads the G-code back, word by word. Without FreeCAD those twenty-seven are
+skipped and the other forty-eight still run.
 
 ## Where things are
 
@@ -292,7 +334,9 @@ other forty-five still run.
 | `InitGui.py` | two lines: hands the work to `kin5axcam/startup.py` |
 | `kin5axcam/startup.py` | waits for the CAM workbench, then registers the command |
 | `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
-| `tests/` | the two halves of the test suite |
+| `post/fanuc_tcp_kin5ax_post.py` | the postprocessor: the whole vector, and the TCP mode round it |
+| `kin5axcam/postinstall.py` | copies that file where FreeCAD looks for postprocessors |
+| `tests/` | the three parts of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |
 
 The operation depends on nothing of kin5ax: a toolpath knows no machine. kin5ax enters at the

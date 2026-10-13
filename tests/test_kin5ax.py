@@ -148,6 +148,34 @@ class AMachine(unittest.TestCase):
         mount = frames[-1][1]
         self.assertGreater(abs(mount[12]) + abs(mount[13]) + abs(mount[14]), 1e-6)
 
+    def test_the_configuration_can_be_set_and_the_frames_follow(self):
+        q = q_inside_limits(self.chain)
+        self.chain.set_configuration(q)
+        for link, value in zip(self.chain.links(), q):
+            self.assertAlmostEqual(value, link.value, delta=1e-12)
+        before = self.chain.frames(kin5ax.PART_TOOL)
+        self.chain.set_configuration([value + 0.01 for value in q])
+        self.assertNotEqual(before, self.chain.frames(kin5ax.PART_TOOL))
+        with self.assertRaises(kin5ax.Kin5axError):
+            self.chain.set_configuration([0.0, 0.0])
+
+    def test_the_boxes_of_the_segments_come_with_the_minimum_corner_first(self):
+        """The Reiden model carries one box on each terminal and none on its joints."""
+        with kin5ax.Chain(os.path.join(CHAINS, "Reiden_RX10_A_SwivelHead_C_RotaryTable.kc.json")) as chain:
+            total = 0
+            for part in (kin5ax.PART_TOOL, kin5ax.PART_MATERIAL_HOLDER):
+                frames = chain.frames(part)
+                for index in range(len(frames)):
+                    boxes = chain.segment_boxes(part, index)
+                    for low, high in boxes:
+                        for k in range(3):
+                            self.assertLessEqual(low[k], high[k])
+                    total += len(boxes)
+                self.assertGreater(len(chain.segment_boxes(part, len(frames) - 1)), 0, "the terminal")
+                with self.assertRaises(kin5ax.Kin5axError):
+                    chain.segment_boxes(part, len(frames))
+            self.assertEqual(2, total)
+
     def test_the_tool_is_as_long_as_its_parts(self):
         self.assertAlmostEqual(0.064 + 0.030 + 0.050, self.tool.assembly_length(), delta=1e-12)
         self.assertLess(self.tool.mount_to_point_distance(), self.tool.assembly_length(),

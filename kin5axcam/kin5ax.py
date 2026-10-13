@@ -323,6 +323,11 @@ def _declare(lib):
     lib.k5_chain_first_rotary_axis.argtypes = [_chain_t, ctypes.c_int, _size_p]
     lib.k5_chain_frames.restype = ctypes.c_int
     lib.k5_chain_frames.argtypes = [_chain_t, ctypes.c_int, _double_p, ctypes.c_size_t, _size_p]
+    lib.k5_chain_segment_boxes.restype = ctypes.c_int
+    lib.k5_chain_segment_boxes.argtypes = [_chain_t, ctypes.c_int, ctypes.c_size_t, _double_p,
+                                           ctypes.c_size_t, _size_p]
+    lib.k5_chain_set_configuration.restype = ctypes.c_int
+    lib.k5_chain_set_configuration.argtypes = [_chain_t, _double_p]
     lib.k5_chain_tool_point.restype = ctypes.c_int
     lib.k5_chain_tool_point.argtypes = [_chain_t, _tool_t, _double_p, _double_p, _double_p]
 
@@ -604,6 +609,28 @@ class Chain(object):
             start = 32 * i
             pairs.append((tuple(out[start:start + 16]), tuple(out[start + 16:start + 32])))
         return pairs
+
+    def segment_boxes(self, part, index):
+        """The collision boxes of one segment of a branch, in the first frame frames() gives for it.
+
+        A list of (minimum corner, maximum corner), each a tuple of three; empty
+        for a segment that carries no box. The segments are numbered as in
+        frames(), the terminal included.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_chain_segment_boxes(self._handle, int(part), int(index), None, 0,
+                                                           ctypes.byref(count)), "k5_chain_segment_boxes")
+        doubles = 6 * count.value
+        out = (ctypes.c_double * max(doubles, 1))()
+        _check(self._lib, self._lib.k5_chain_segment_boxes(self._handle, int(part), int(index), out,
+                                                           doubles, ctypes.byref(count)),
+               "k5_chain_segment_boxes")
+        return [(tuple(out[6 * i:6 * i + 3]), tuple(out[6 * i + 3:6 * i + 6])) for i in range(count.value)]
+
+    def set_configuration(self, q):
+        """Puts the chain into these joint values, limits unchecked; frames() and links() follow."""
+        _check(self._lib, self._lib.k5_chain_set_configuration(self._handle, _doubles(q, AXES, "q")),
+               "k5_chain_set_configuration")
 
     def tool_point(self, q, tool=None):
         """The forward kinematics: where the programmed point ends up, and the tool axis, for these joints."""

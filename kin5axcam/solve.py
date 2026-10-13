@@ -257,11 +257,24 @@ class Step(object):
 class Trajectory(object):
     """What solving the moves of an operation gave: a step per location, and the report of the run."""
 
-    def __init__(self, steps, report, position_error_mm, orientation_error):
+    def __init__(self, steps, report, position_error_mm, orientation_error, path=None, tool=None):
         self.steps = steps
         self.report = report                    #{status name: count}, the statuses nobody got left out
         self.position_error_mm = position_error_mm
         self.orientation_error = orientation_error
+        #the path and the tool of the library, kept when the caller asked for them - a cutting
+        #simulation needs both alive - and the caller's to close; None otherwise
+        self.path = path
+        self.tool = tool
+
+    def close(self):
+        """Releases the path and the tool of the library, when they were kept."""
+        if self.path is not None:
+            self.path.close()
+            self.path = None
+        if self.tool is not None:
+            self.tool.close()
+            self.tool = None
 
     @property
     def unsolved(self):
@@ -274,12 +287,14 @@ class Trajectory(object):
             self.position_error_mm, self.orientation_error)
 
 
-def solve(chain, moves, tool_model, options):
+def solve(chain, moves, tool_model, options, keep=False):
     """The moves solved for the chain: a Trajectory in the order of the path.
 
     tool_model may be None when the options do not check collisions; the tool is
-    made for the library here and freed afterwards. A location the solver
-    invents on the way to a move is given that move.
+    made for the library here and freed afterwards - unless keep is asked for,
+    and then the Trajectory carries the path and the tool of the library for a
+    cutting simulation, and closing the Trajectory releases them. A location the
+    solver invents on the way to a move is given that move.
     """
     if tool_model is None and options.check_collisions:
         raise ValueError("there is no tool to check collisions with: pick a tool controller, or "
@@ -291,20 +306,29 @@ def solve(chain, moves, tool_model, options):
         positions.append(tuple(c / scale for c in programmed))
         axes.append(move.axis)
     tool = tool_model.to_kin5ax(scale) if tool_model is not None else None
+    path = None
     try:
-        with chain.postprocess_locations(positions, axes, options.settings(), tool) as path:
-            steps = []
-            for location in path.locations():
-                index = location.file_location - 1
-                if location.origin != kin5ax.FROM_FILE:
-                    index = min(index + 1, len(moves) - 1)
-                steps.append(Step(location.q, location.status, location.origin, moves[index]))
-            report = path.report()
-            position_error, orientation_error = path.errors()
-    finally:
+        path = chain.postprocess_locations(positions, axes, options.settings(), tool)
+        steps = []
+        for location in path.locations():
+            index = location.file_location - 1
+            if location.origin != kin5ax.FROM_FILE:
+                index = min(index + 1, len(moves) - 1)
+            steps.append(Step(location.q, location.status, location.origin, moves[index]))
+        report = path.report()
+        position_error, orientation_error = path.errors()
+    except Exception:
+        if path is not None:
+            path.close()
         if tool is not None:
             tool.close()
-    return Trajectory(steps, report, position_error * scale, orientation_error)
+        raise
+    if not keep:
+        path.close()
+        if tool is not None:
+            tool.close()
+        path = tool = None
+    return Trajectory(steps, report, position_error * scale, orientation_error, path, tool)
 
 
 def rotary_letters(chain, options):

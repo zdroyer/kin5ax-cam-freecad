@@ -257,8 +257,26 @@ Properties worth knowing: `Operations` (none means every active operation of the
 the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and
 `Start`. The unit of the chain file is on the machine, `UnitInMillimetres`.
 
-What it does not do yet: cut. The stock sits in the material frame whole; the cutting simulation is
-the next step and lives in the library already.
+**The cut.** With `Cut` on — it is, by default — the stock of the job becomes a block of voxels in
+the library, in the frame of the material, and every step cuts it with the tool of the step's
+operation: the ball or the flat end takes material off, and anything the shank or the holder meets
+that is still there is a **gouge**. What is left is a **point cloud** under the material part, one
+point per surface voxel, redrawn every `RefreshEvery` steps; `RemovedVolume` and `Gouges` are
+properties, the first gouge is an orange marker, and the player shows both under the slider.
+`VoxelSize` is a hundred and fiftieth of the stock's longest side unless set — a 100 mm stock cuts in
+0.67 mm voxels.
+
+Three things to know about it. The library stamps the tool into the voxels **once per location
+with nothing swept between two**, so when cutting the simulation makes the invented steps as dense
+as the voxels (`MaxStep` left at 0) — many more locations than the operation has moves, and the
+reason a cut looks like a cut. **Stepping backwards starts the cut again** from a whole block, since
+voxels cannot be uncut; scrubbing the slider back is a recut up to there, which is fast at these
+sizes. And the cut needs the solved paths of the library, which live only while the document is
+open: a reopened document still scrubs the machine, but **recompute the simulation to cut again**.
+
+What is not here yet: a surface rather than points (a mesh of cube faces, then marching cubes in the
+library), the sweep of the tool between two locations, and the difference between what is left and
+the model, which is what a finish pass is judged by.
 
 ## Installing it
 
@@ -414,7 +432,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-114 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+121 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
@@ -426,8 +444,10 @@ oracle: the joint values of the last line, put back into the chain, have to give
 the last move. `tests/test_kin5ax.py` checks the binding against the same oracle, and
 `tests/test_machine.py` and `tests/test_simulation.py` close the loop over the document: at the
 last step the tool hanging from the mount part puts its ball centre, in the frame of the material
-part, where the last move asked. Without FreeCAD fifty are skipped and the other sixty-four still
-run; the ones that need the shared library skip when it is not built.
+part, where the last move asked — and the stock has less volume after the path than before it, the
+same amount whether a step is reached forwards or after going back. Without FreeCAD fifty-four are
+skipped and the other sixty-seven still run; the ones that need the shared library skip when it is
+not built.
 
 ## Where things are
 

@@ -231,6 +231,9 @@ class Player(object):
             status = sim.Statuses[step] if step < len(sim.Statuses) else -1
             text = translate("Kin5axMachine", "location %d of %d: unreachable - %s") % (
                 step + 1, count, kin5ax.SOLVE_STATUS_NAMES.get(status, "?"))
+        if getattr(sim, "Cut", False) and sim.Cloud is not None:
+            text += "\n" + translate("Kin5axMachine", "cut: %.0f mm3 removed, %d gouges") % (
+                sim.RemovedVolume, sim.Gouges)
         self.where.setText(text)
 
     def slide(self, value):

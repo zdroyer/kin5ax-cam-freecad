@@ -140,6 +140,53 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertIn(self.simulation.Unreachable, self.machine.Material.Group)
         self.assertNotIn("solved", self.simulation.Report.replace("unsolved", ""))
 
+    def test_the_stock_is_cut_as_the_machine_goes(self):
+        """The ball of the tool takes material off the top of the box; what is left is a cloud."""
+        sim = self.simulation
+        self.assertTrue(sim.Cut)
+        self.assertIsNotNone(sim.Cloud, "the stock as points, from the start")
+        self.assertIn(sim.Cloud, self.machine.Material.Group)
+        whole = sim.Cloud.Points.CountPoints
+        self.assertGreater(whole, 0)
+        self.assertEqual(0.0, sim.RemovedVolume)
+
+        sim.Step = sim.StepCount - 1
+        self.assertGreater(sim.RemovedVolume, 0.0, "the path went through the stock")
+        stock = self.job.Stock.Shape.Volume
+        self.assertLess(sim.RemovedVolume, 0.5 * stock, "but took far from all of it")
+        self.assertEqual(0, sim.Gouges, "the holder stayed above the box")
+        self.assertIsNone(sim.GougeMarker)
+        self.assertNotEqual(whole, sim.Cloud.Points.CountPoints, "the surface changed")
+
+    def test_the_cut_is_the_same_whether_a_step_is_reached_forwards_or_after_going_back(self):
+        sim = self.simulation
+        middle = sim.StepCount // 2
+        sim.Step = middle
+        forwards = sim.RemovedVolume
+        self.assertGreater(forwards, 0.0)
+        sim.Step = sim.StepCount - 1
+        self.assertGreater(sim.RemovedVolume, forwards)
+        sim.Step = middle
+        self.assertAlmostEqual(forwards, sim.RemovedVolume, delta=1e-9,
+                               msg="going back starts the cut again from a whole block")
+        sim.Step = 0
+        self.assertAlmostEqual(0.0, sim.RemovedVolume, delta=1e-9, msg="nothing cut at the first step")
+
+    def test_the_steps_are_as_dense_as_the_voxels_when_cutting(self):
+        """A stamp per location needs a location per voxel, so the cut sets the step when none is set."""
+        sim = self.simulation
+        options = sim.Proxy.options(sim)
+        self.assertAlmostEqual(sim.Proxy.voxelSize(sim), options.max_step_mm, delta=1e-12)
+        self.assertGreater(sim.StepCount, 100, "many more locations than the operation's moves")
+
+    def test_switching_the_cut_off_takes_the_cloud_away(self):
+        sim = self.simulation
+        sim.Cut = False
+        self.document.recompute()
+        self.assertIsNone(sim.Cloud)
+        sim.Step = sim.StepCount - 1
+        self.assertEqual(0.0, sim.RemovedVolume)
+
     def test_only_the_operations_asked_for_are_run(self):
         self.simulation.Operations = [self.operation]
         self.document.recompute()

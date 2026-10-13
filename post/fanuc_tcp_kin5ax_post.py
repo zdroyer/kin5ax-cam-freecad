@@ -703,194 +703,82 @@ def formatFeed(value):
 
 
 class Machine(object):
-    """A machine of kin5ax, and the solving of an operation's moves for it.
+    """A machine of kin5ax, and the writing of an operation's moves as its axes.
 
-    Opened once per export, with the chain file and the settings the arguments
+    Opened once per export, with the chain file and the options the arguments
     asked for. parse() takes an operation and gives back its G-code, the moves
-    as joint values; the tool is made from the tool controller of the operation
-    each time, since operations have tools of their own.
+    as joint values. The solving itself - the moves out of the operation, the
+    tool out of its controller, the trajectory back from kin5ax - is
+    kin5axcam.solve, shared with the simulation, so that a program and a picture
+    of the same operation can never disagree.
     """
 
     def __init__(self, chain_file):
-        from kin5axcam import kin5ax
+        from kin5axcam import kin5ax, solve
 
         self.kin5ax = kin5ax
+        self.solve = solve
         self.chain = kin5ax.Chain(chain_file)
         if not self.chain.is_5c():
             raise ValueError("%s is not a five-axis chain of three linear and two rotary joints"
                              % chain_file)
-        self.scale = MACHINE_UNIT_IN_MM          # mm per unit of the chain file
+        self.options = solve.Options(
+            unit_in_mm=MACHINE_UNIT_IN_MM, holder_length_mm=HOLDER_LENGTH_MM,
+            holder_radius_mm=HOLDER_RADIUS_MM, check_limits=CHECK_LIMITS,
+            check_collisions=CHECK_COLLISIONS, interpolate=INTERPOLATE, max_step_mm=MAX_STEP_MM,
+            max_turn_degrees=MAX_TURN_DEGREES, start=START_CRITERION, rotary_letters=ROTARY_LETTERS)
+        self.scale = self.options.unit_in_mm      # mm per unit of the chain file
         self.axes = self.chain.default_gcode_axes()
-        self.letters = self.rotaryLetters()
-        self.settings = self.makeSettings()
+        self.letters = solve.rotary_letters(self.chain, self.options)
         self.links = self.chain.links()
 
-    def rotaryLetters(self):
-        """What the control calls the two rotary axes: the argument, the names of the links, the guess."""
-        if ROTARY_LETTERS:
-            return ROTARY_LETTERS[0], ROTARY_LETTERS[1]
-        links = self.chain.links()
-        letters = []
-        for index in (self.axes.angle1, self.axes.angle2):
-            name = links[index].name.strip().upper()
-            letters.append(name if name in ("A", "B", "C") else None)
-        if None in letters or letters[0] == letters[1]:
-            return self.axes.angle1_letter, self.axes.angle2_letter
-        return letters[0], letters[1]
-
-    def makeSettings(self):
-        kin5ax = self.kin5ax
-        settings = kin5ax.Settings.default()
-        settings.check_limits = 1 if CHECK_LIMITS else 0
-        settings.check_collisions = 1 if CHECK_COLLISIONS else 0
-        settings.interpolate = 1 if INTERPOLATE else 0
-        if MAX_STEP_MM is not None:
-            settings.max_position_difference = MAX_STEP_MM / self.scale
-        if MAX_TURN_DEGREES is not None:
-            settings.max_orientation_difference_degrees = MAX_TURN_DEGREES
-        if START_CRITERION is not None:
-            settings.start_criterion = {
-                "MIN": kin5ax.START_MIN, "MAX": kin5ax.START_MAX,
-                "MIN_ABS": kin5ax.START_MIN_ABS, "SHORTEST": kin5ax.START_SHORTEST_PATH,
-            }[START_CRITERION]
-        return settings
-
     def makeTool(self, pathobj):
-        """The tool of the operation as kin5ax sees it, or None when the operation has none.
-
-        A ball nose bit is a ball of half its diameter, programmed at the centre
-        of the ball; anything else is a flat end of half its diameter, programmed
-        at the tip. The shank is taken as wide as the cutter, which flags a
-        collision sooner rather than later. The holder is what the arguments say,
-        a tool bit not describing one.
-        """
-        kin5ax = self.kin5ax
-        controller = getattr(pathobj, "ToolController", None)
-        tool = getattr(controller, "Tool", None)
-        if tool is None:
-            return None
-        diameter = float(getattr(getattr(tool, "Diameter", 0.0), "Value", getattr(tool, "Diameter", 0.0)))
-        if diameter <= 0.0:
-            return None
-        shape = str(getattr(tool, "ShapeType", "") or getattr(tool, "ShapeName", "")).lower()
-        cutting = float(getattr(getattr(tool, "CuttingEdgeHeight", 0.0), "Value",
-                                getattr(tool, "CuttingEdgeHeight", 0.0)))
-        length = float(getattr(getattr(tool, "Length", 0.0), "Value", getattr(tool, "Length", 0.0)))
-        if cutting <= 0.0:
-            cutting = 2.0 * diameter
-        shank = max(length - cutting, 0.0)
-        radius = 0.5 * diameter / self.scale
-        kind = kin5ax.TOOL_BALL_NOSE if shape in ("ballend", "ballnose", "taperedballnose") \
-            else kin5ax.TOOL_FLAT_END
-        return kin5ax.Tool(kind, radius, radius, cutting / self.scale, shank / self.scale,
-                           HOLDER_LENGTH_MM / self.scale, HOLDER_RADIUS_MM / self.scale)
-
-    def collect(self, pathobj):
-        """The moves of the operation as locations for the solver, and everything else as it is.
-
-        A list of entries in the order of the path: ("move", command, point_mm,
-        axis, feed) for G0 and G1, ("other", command) for the rest. The point is
-        the tip of the tool, carried forward word by word the way a control
-        carries it; the axis is the last I J K seen, which is the tool standing up
-        until a move says otherwise. The first moves, before all three of X, Y
-        and Z have been given, are folded into the first move that has them: a
-        machine cannot be sent to a point it has not been told the whole of.
-        """
-        entries = []
-        current = {}
-        axis = VERTICAL
-        pending = None
-        for command in PathUtils.getPathWithPlacement(pathobj).Commands:
-            name = command.Name
-            if name in ARC_COMMANDS or name.startswith("G8") or name.startswith("G7"):
-                raise ValueError("%s is a %s, which the solver does not take: an arc has to be "
-                                 "written as lines and a cycle as moves before it can be solved"
-                                 % (pathobj.Label, name))
-            if name not in LINEAR_COMMANDS:
-                entries.append(("other", command))
-                continue
-            parameters = command.Parameters
-            for word in ("X", "Y", "Z"):
-                if word in parameters:
-                    current[word] = float(parameters[word])
-            if all(word in parameters for word in ("I", "J", "K")):
-                axis = (float(parameters["I"]), float(parameters["J"]), float(parameters["K"]))
-            feed = float(parameters["F"]) if "F" in parameters else None
-            if not all(word in current for word in ("X", "Y", "Z")):
-                pending = (name, feed)
-                continue
-            if pending is not None:
-                name = pending[0] if pending[0] in RAPID_COMMANDS else name
-                pending = None
-            entries.append(("move", name, (current["X"], current["Y"], current["Z"]), axis, feed))
-        return entries
+        """The tool of the operation as kin5ax sees it, or None when the operation has none."""
+        return self.solve.tool_of(pathobj, self.options)
 
     def parse(self, pathobj):
         """The G-code of one operation: its moves solved for this machine."""
-        kin5ax = self.kin5ax
-        entries = self.collect(pathobj)
-        moves = [entry for entry in entries if entry[0] == "move"]
-        tool = self.makeTool(pathobj)
-        if tool is None and CHECK_COLLISIONS:
+        solve = self.solve
+        moves = solve.moves_of(pathobj)
+        model = solve.tool_model_of(pathobj, self.options)
+        if model is None and self.options.check_collisions:
             raise ValueError("%s has no tool to check collisions with: pick a tool controller, or "
                              "post with --no-collisions" % pathobj.Label)
+        trajectory = solve.solve(self.chain, moves, model, self.options)
 
-        # the programmed point: the ball nose tool of kin5ax is programmed at the centre of its ball,
-        # one radius up the axis from the tip the path carries
-        positions, vectors = [], []
-        for _, _, point, axis, _ in moves:
-            lift = tool.r if (tool is not None and tool.shape == kin5ax.TOOL_BALL_NOSE) else 0.0
-            positions.append(tuple(point[i] / self.scale + lift * axis[i] for i in range(3)))
-            vectors.append(axis)
-        path = self.chain.postprocess_locations(positions, vectors, self.settings, tool)
-
-        # the solved locations, back in the order of the path: a location of the file is its move,
-        # one invented on the way to the next belongs to that next move
-        solved = {}
-        unsolved = []
-        for location in path.locations():
-            index = location.file_location - 1
-            if location.origin != kin5ax.FROM_FILE:
-                index = min(index + 1, len(moves) - 1)
-            solved.setdefault(index, []).append(location)
-            if not location.has_solution:
-                unsolved.append((index, location))
-        report = path.report()
-        position_error, orientation_error = path.errors()
-        path.close()
-        if tool is not None:
-            tool.close()
+        # the steps of the trajectory, by the command of the path that becomes them: a location of
+        # the path is its move, one invented on the way to the next belongs to that next move
+        steps = {}
+        for step in trajectory.steps:
+            steps.setdefault(step.move.source, []).append(step)
 
         out = ""
         if OUTPUT_COMMENTS:
             out += linenumber() + "(SOLVED FOR %s BY KIN5AX %s: AXES %s %s, TOOL LENGTH IN THE MODEL)\n" % (
-                self.chain.name().upper(), kin5ax.version(), self.letters[0], self.letters[1])
+                self.chain.name().upper(), self.kin5ax.version(), self.letters[0], self.letters[1])
         last = {}
         lastcommand = None
         lastfeed = None
-        move_index = -1
-        for entry in entries:
-            if entry[0] == "other":
-                command = entry[1]
+        for source, command in enumerate(PathUtils.getPathWithPlacement(pathobj).Commands):
+            if command.Name not in LINEAR_COMMANDS:
                 if command.Name.startswith("(") and not OUTPUT_COMMENTS:
                     continue
                 words = [command.Name] + ["%s%s" % (k, v) for k, v in command.Parameters.items()]
                 out += linenumber() + COMMAND_SPACE.join(words).upper() + "\n"
                 continue
-            move_index += 1
-            _, name, point, axis, feed = entry
-            for location in solved.get(move_index, []):
-                if not location.has_solution:
+            for step in steps.get(source, []):
+                move = step.move
+                if not step.solved:
                     if OUTPUT_COMMENTS:
                         out += linenumber() + "(UNSOLVED: %s AT X%s Y%s Z%s)\n" % (
-                            location.status_name.upper(), formatLength(point[0]),
-                            formatLength(point[1]), formatLength(point[2]))
+                            step.status_name.upper(), formatLength(move.point[0]),
+                            formatLength(move.point[1]), formatLength(move.point[2]))
                     continue
                 words = []
-                if not (MODAL and name == lastcommand):
-                    words.append(name)
+                if not (MODAL and move.command == lastcommand):
+                    words.append(move.command)
                 for letter, index, scale, unlimited in self.axisWords():
-                    value = location.q[index] * scale
+                    value = step.q[index] * scale
                     if unlimited:
                         value = self.nearestTurn(value, last.get(letter))
                     text = noNegativeZero(formatLength(value) if letter in "XYZ"
@@ -900,22 +788,20 @@ class Machine(object):
                     if OUTPUT_DOUBLES or last.get(letter) != text:
                         words.append(letter + text)
                         last[letter] = text
-                if feed and name not in RAPID_COMMANDS and (feed != lastfeed or OUTPUT_DOUBLES):
-                    words.append("F" + formatFeed(feed))
-                    lastfeed = feed
+                if move.feed and not move.rapid and (move.feed != lastfeed or OUTPUT_DOUBLES):
+                    words.append("F" + formatFeed(move.feed))
+                    lastfeed = move.feed
                 if words:
                     out += linenumber() + COMMAND_SPACE.join(words).upper() + "\n"
-                lastcommand = name
+                lastcommand = move.command
         if OUTPUT_COMMENTS:
-            out += linenumber() + "(KIN5AX: %s; LARGEST ERRORS %.3g MM AND %.3g)\n" % (
-                ", ".join("%d %s" % (count, status.upper()) for status, count in sorted(report.items())),
-                position_error * self.scale, orientation_error)
+            out += linenumber() + "(KIN5AX: %s)\n" % trajectory.describe().upper()
+        unsolved = trajectory.unsolved
         if unsolved:
             FreeCAD.Console.PrintWarning(
                 "fanuc_tcp_kin5ax: %s: %d of %d locations have no solution on %s - %s\n" % (
-                    pathobj.Label, len(unsolved), sum(len(v) for v in solved.values()),
-                    self.chain.name(), ", ".join("%d %s" % (count, status)
-                                                 for status, count in sorted(report.items()))))
+                    pathobj.Label, len(unsolved), len(trajectory.steps), self.chain.name(),
+                    trajectory.describe()))
         return out
 
     def axisWords(self):

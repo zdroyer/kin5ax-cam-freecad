@@ -48,9 +48,16 @@ def register(*ignored):
             _say_error("kin5axcam: the 3D Surface (5axis) operation could not be registered: "
                        "%s: %s" % (type(problem).__name__, problem))
         return False
+    try:
+        from kin5axcam import machine_gui        # noqa: F401 - the machine and the simulation
+    except Exception as problem:
+        #the operation is in place either way; the machine needs the shared library at run time,
+        #not at registration, so a failure here is a bug and is said so
+        _say_error("kin5axcam: the machine commands could not be registered: %s: %s"
+                   % (type(problem).__name__, problem))
     _done = True
     stop()
-    _say_log("kin5axcam: CAM_Surface5Axis registered")
+    _say_log("kin5axcam: CAM_Surface5Axis, CAM_Kin5axMachine and CAM_Kin5axSimulate registered")
     return True
 
 

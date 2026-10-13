@@ -219,6 +219,47 @@ The file keeps the licence it came from, **LGPL-2.1-or-later**, not the MIT of t
 and keeps its FreeCAD copyright lines. Being a copy rather than a rewrite means a fix to FreeCAD's
 Fanuc post can be brought over by reading the difference between the two files.
 
+## The machine on the screen
+
+Two more commands, registered with the operation: **Machine from kin5ax** (`CAM_Kin5axMachine`) and
+**Simulate on the machine** (`CAM_Kin5axSimulate`). Like the operation they go on a toolbar of your
+own through Tools → Customize, or run from the console:
+
+```python
+FreeCADGui.runCommand("CAM_Kin5axMachine")      # asks for a .kc.json, puts the machine in the document
+FreeCADGui.runCommand("CAM_Kin5axSimulate")     # the job on the machine, solved, and the player
+```
+
+**The machine** is a group with an `App::Part` per segment of each branch of the chain. Each holds
+the collision boxes of that segment exactly as the file gives them and the solver checks them — what
+is seen is what collides — and a thin arm to the next segment, so a file that carries boxes on its
+terminals only (the three shipped machines do) is still a stick figure that moves the right way. Two
+more parts mark the ends: the **tool mount** and the **material**. Set its `Configuration` — five
+joint values, in the order of the links of the chain, in the units of the file — and every part is
+placed by the frames kin5ax computes; no recompute, the placements change under the view. A segment
+part can hold anything, so a real body of the machine can be dropped in next to its boxes.
+
+**The simulation** holds a machine, a job and the trajectory the operations of the job solve to on
+that machine — five joint values per location, the ones kin5ax invents between two moves included,
+kept in its properties so that a saved document still scrubs. Recomputing it is the batch: every
+operation solved again, the same `kin5axcam.solve` the post uses, so what is seen here is what is
+written there. Its `Step` is the picture: the machine takes that configuration, the tool of the
+step's operation hangs from the mount by the length of its assembly (the bit's own solid, or a
+cylinder when it has none), the model and the stock of the job sit in the frame of the material
+through links, and a location the machine cannot reach is a **red vertex** where its tip would have
+been. The report of the solve is a property too.
+
+**The player** is the task panel the simulate command opens: a slider over the locations, play and
+pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
+nothing else.
+
+Properties worth knowing: `Operations` (none means every active operation of the job), the holder
+the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and
+`Start`. The unit of the chain file is on the machine, `UnitInMillimetres`.
+
+What it does not do yet: cut. The stock sits in the material frame whole; the cutting simulation is
+the next step and lives in the library already.
+
 ## Installing it
 
 **Ask FreeCAD where its `Mod` folder is rather than guessing.** In the Python console:
@@ -373,7 +414,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-99 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+114 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
@@ -382,9 +423,11 @@ operation and reads the commands that come out. `tests/test_post.py` posts a lea
 the postprocessor and reads the G-code back, word by word — with a vector, and solved for the
 trunnion table of the library's test set, where the forward kinematics of the library is the
 oracle: the joint values of the last line, put back into the chain, have to give the ball centre of
-the last move. `tests/test_kin5ax.py` checks the binding against the same oracle. Without FreeCAD
-thirty-seven are skipped and the other sixty-two still run; the ones that need the shared library
-skip when it is not built.
+the last move. `tests/test_kin5ax.py` checks the binding against the same oracle, and
+`tests/test_machine.py` and `tests/test_simulation.py` close the loop over the document: at the
+last step the tool hanging from the mount part puts its ball centre, in the frame of the material
+part, where the last move asked. Without FreeCAD fifty are skipped and the other sixty-four still
+run; the ones that need the shared library skip when it is not built.
 
 ## Where things are
 
@@ -397,6 +440,10 @@ skip when it is not built.
 | `kin5axcam/startup.py` | waits for the CAM workbench, then registers the command |
 | `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
 | `kin5axcam/kin5ax.py` | kin5ax from Python: a ctypes binding to the C interface of the library |
+| `kin5axcam/solve.py` | an operation solved for a machine: the moves, the tool, the trajectory — shared by the post and the simulation |
+| `kin5axcam/machine.py` | the machine in the document: a part per segment, placed by the chain |
+| `kin5axcam/simulation.py` | a job on a machine: the trajectory in properties, `Step` posing the machine |
+| `kin5axcam/machine_gui.py` | the two commands and the player |
 | `post/fanuc_tcp_kin5ax_post.py` | the postprocessor: the whole vector with TCP, or the five axes solved by kin5ax |
 | `kin5axcam/postinstall.py` | copies that file where FreeCAD looks for postprocessors |
 | `tests/` | the three parts of the test suite |

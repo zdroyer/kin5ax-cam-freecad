@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The simulation: the machine of the other icon with a play mark over it -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect x="6" y="4" width="14" height="44" rx="2" fill="#729fcf" stroke="#3465a4" stroke-width="2"/>
+  <path d="M20 10 h20 a3 3 0 0 1 3 3 v8 a3 3 0 0 1 -3 3 h-20 z" fill="#729fcf" stroke="#3465a4" stroke-width="2"/>
+  <g transform="rotate(25 36 24)">
+    <rect x="31" y="22" width="10" height="16" rx="1.5" fill="#587ca3" stroke="#3465a4" stroke-width="2"/>
+    <rect x="34" y="38" width="4" height="9" fill="#2e3436"/>
+    <circle cx="36" cy="48" r="2.2" fill="#2e3436"/>
+  </g>
+  <ellipse cx="40" cy="54" rx="18" ry="5" fill="#73d216" stroke="#2e3436" stroke-width="2"/>
+  <ellipse cx="40" cy="50" rx="18" ry="5" fill="#8ae234" stroke="#2e3436" stroke-width="2"/>
+  <path d="M22 50 v4 M58 50 v4" stroke="#2e3436" stroke-width="2"/>
+  <!-- the play mark -->
+  <circle cx="48" cy="16" r="12" fill="#ffffff" stroke="#2e3436" stroke-width="2"/>
+  <path d="M44 9 l10 7 l-10 7 z" fill="#2e3436"/>
+</svg>

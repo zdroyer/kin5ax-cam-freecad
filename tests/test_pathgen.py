@@ -1,4 +1,4 @@
-"""The zigzag and the ball centre offset, against surfaces whose answers are known on paper.
+"""The zigzag and the tip of the tool, against surfaces whose answers are known on paper.
 
 Nothing here imports FreeCAD: the generator asks a surface four things and these
 surfaces answer them, so the geometry is checked without a CAD kernel in the way.
@@ -95,50 +95,82 @@ class PlaneWithoutADomain(object):
 
 
 def parameters(**kwargs):
-    kwargs.setdefault("tool_radius", 3.0)
+    kwargs.setdefault("tip_radius", 3.0)
     kwargs.setdefault("rows", 3)
     kwargs.setdefault("points_per_row", 5)
     return pathgen.ZigZagParameters(**kwargs)
 
 
-class TheBallCentreIsTheProgrammedPoint(unittest.TestCase):
+def ball_centre(location, tip_radius):
+    """Where the sphere at the end of the tool is: a tip radius up the axis from the tip."""
+    return tuple(location.point[i] + tip_radius * location.axis[i] for i in range(3))
 
-    def test_on_a_plane_it_is_one_radius_above_the_surface(self):
-        passes = pathgen.generate_passes(Plane(), parameters(tool_radius=3.0))
-        self.assertEqual(3, len(passes))
-        for one in passes:
-            self.assertEqual(5, len(one))
-            for location in one:
-                self.assertAlmostEqual(3.0, location.point[2], delta=1e-12)
-                self.assertAlmostEqual(0.0, location.surface_point[2], delta=1e-12)
-                self.assertEqual(location.point[0], location.surface_point[0])
-                self.assertEqual(location.point[1], location.surface_point[1])
-                self.assertEqual(pathgen.VERTICAL_AXIS, location.axis)
 
-    def test_on_a_sphere_every_centre_is_a_radius_further_out(self):
+def length(v):
+    return math.sqrt(sum(c * c for c in v))
+
+
+class ThePointOfThePathIsTheTip(unittest.TestCase):
+    """What the commands carry, and the sphere at the end of the tool it is worked out from."""
+
+    def test_on_a_flat_face_the_tip_sits_on_the_surface(self):
+        """Whatever the radius: the face is level, so the ball touches it straight underneath."""
+        for radius in (0.0, 3.0, 25.0):
+            passes = pathgen.generate_passes(Plane(), parameters(tip_radius=radius))
+            self.assertEqual(3, len(passes))
+            for one in passes:
+                self.assertEqual(5, len(one))
+                for location in one:
+                    self.assertAlmostEqual(0.0, location.point[2], delta=1e-12,
+                                           msg="a tip radius of %r" % radius)
+                    self.assertEqual(location.point[0], location.surface_point[0])
+                    self.assertEqual(location.point[1], location.surface_point[1])
+                    self.assertEqual(pathgen.VERTICAL_AXIS, location.axis)
+
+    def test_a_tool_with_nothing_round_about_it_puts_its_tip_on_the_surface_point(self):
+        """An end mill, a V bit, a drill: a tip radius of zero, and no offset to make."""
         surface = Sphere(radius=10.0)
-        passes = pathgen.generate_passes(surface, parameters(tool_radius=2.5, rows=7, points_per_row=13))
+        passes = pathgen.generate_passes(surface, parameters(tip_radius=0.0, rows=5, points_per_row=9))
+        self.assertEqual(5, len(passes))
+        for one in passes:
+            for location in one:
+                self.assertEqual(location.surface_point, location.point)
+
+    def test_the_ball_of_the_tool_touches_the_surface_where_the_point_came_from(self):
+        """The invariant the offset is for, on a face that curves away in both parameters.
+
+        The ball is one radius from the surface point, and on the outside of the
+        sphere rather than inside it, which is to say along the normal.
+        """
+        radius = 2.5
+        surface = Sphere(radius=10.0)
+        passes = pathgen.generate_passes(surface,
+                                         parameters(tip_radius=radius, rows=7, points_per_row=13))
         self.assertEqual(7, len(passes))
         for one in passes:
             for location in one:
-                distance = math.sqrt(sum(c * c for c in location.point))
-                self.assertAlmostEqual(12.5, distance, delta=1e-12)
-                #and the ball touches the sphere where the location was taken from
-                touch = math.sqrt(sum(c * c for c in location.surface_point))
-                self.assertAlmostEqual(10.0, touch, delta=1e-12)
+                centre = ball_centre(location, radius)
+                self.assertAlmostEqual(12.5, length(centre), delta=1e-12,
+                                       msg="a ball of 2.5 rides on a sphere of 10 + 2.5")
+                touch = [centre[i] - location.surface_point[i] for i in range(3)]
+                self.assertAlmostEqual(radius, length(touch), delta=1e-12,
+                                       msg="the ball touches the surface")
+                for i in range(3):
+                    self.assertAlmostEqual(radius * location.normal[i], touch[i], delta=1e-12,
+                                           msg="and touches it along the normal")
 
     def test_the_normal_can_be_turned_round(self):
         surface = Sphere(radius=10.0)
-        passes = pathgen.generate_passes(surface, parameters(tool_radius=2.5, flip_normal=True))
+        passes = pathgen.generate_passes(surface, parameters(tip_radius=2.5, flip_normal=True))
         for one in passes:
             for location in one:
-                distance = math.sqrt(sum(c * c for c in location.point))
-                self.assertAlmostEqual(7.5, distance, delta=1e-12)
+                #the tool goes inside the sphere now, so its ball rides on one of 10 - 2.5
+                self.assertAlmostEqual(7.5, length(ball_centre(location, 2.5)), delta=1e-12)
 
     def test_a_point_of_the_surface_can_be_a_vector_object(self):
         passes = pathgen.generate_passes(PlaneOfVectors(), parameters())
         self.assertEqual(3, len(passes))
-        self.assertAlmostEqual(3.0, passes[0][0].point[2], delta=1e-12)
+        self.assertAlmostEqual(0.0, passes[0][0].point[2], delta=1e-12)
 
 
 class TheZigZag(unittest.TestCase):
@@ -207,8 +239,7 @@ class ParametersThatCannotMakeAPath(unittest.TestCase):
 
     def test_they_are_refused_with_a_reason(self):
         surface = Plane()
-        for kwargs, word in (({"tool_radius": 0.0}, "radius"),
-                             ({"tool_radius": -1.0}, "radius"),
+        for kwargs, word in (({"tip_radius": -1.0}, "radius"),
                              ({"rows": 0}, "pass"),
                              ({"points_per_row": 1}, "two points"),
                              ({"direction": "W"}, "direction")):
@@ -216,9 +247,9 @@ class ParametersThatCannotMakeAPath(unittest.TestCase):
                 pathgen.generate_passes(surface, parameters(**kwargs))
             self.assertIn(word, str(caught.exception), msg="for %r" % kwargs)
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_a_tool_with_no_radius_at_all_is_not_one_of_them(self):
+        """A flat tool is a tip radius of zero, which was refused while this cut with a ball only."""
+        self.assertEqual(3, len(pathgen.generate_passes(Plane(), parameters(tip_radius=0.0))))
 
 
 class TheDepths(unittest.TestCase):
@@ -232,26 +263,23 @@ class TheDepths(unittest.TestCase):
                 return (u, v, u)            # z rises with u
 
             def normalAt(self, u, v):
-                return (0.0, 0.0, 1.0)      # straight up, so the tip is one radius below the centre
+                return (0.0, 0.0, 1.0)      # straight up, so the tip lands on the surface point
 
-        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tool_radius=3.0))
+        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tip_radius=3.0))
 
-    def test_the_tip_is_a_radius_down_the_axis_from_the_centre(self):
-        passes = pathgen.generate_passes(Plane(), parameters(rows=1, points_per_row=2))
-        location = passes[0][0]
-        self.assertAlmostEqual(3.0, location.point[2], delta=1e-12)
-        self.assertAlmostEqual(0.0, pathgen.tip_of(location, 3.0)[2], delta=1e-12,
-                               msg="the tip of the ball sits on the surface")
+    def test_the_height_that_is_clipped_is_the_height_of_the_tip(self):
+        passes = self.passes_over_a_slope()
+        self.assertEqual([0.0, 25.0, 50.0, 75.0, 100.0], [l.point[2] for l in passes[0]])
 
     def test_nothing_is_taken_out_when_the_range_holds_it_all(self):
         passes = self.passes_over_a_slope()
-        kept = pathgen.clip_to_depths(passes, -1.0, 101.0, 3.0)
+        kept = pathgen.clip_to_depths(passes, -1.0, 101.0)
         self.assertEqual([[l.u for l in one] for one in passes],
                          [[l.u for l in one] for one in kept])
 
     def test_what_is_too_deep_or_too_high_goes(self):
         passes = self.passes_over_a_slope()          # tips at z = 0, 25, 50, 75, 100
-        kept = pathgen.clip_to_depths(passes, 20.0, 80.0, 3.0)
+        kept = pathgen.clip_to_depths(passes, 20.0, 80.0)
         self.assertEqual([[25.0, 50.0, 75.0]], [[l.u for l in one] for one in kept])
 
     def test_a_range_in_the_middle_breaks_the_pass_in_two(self):
@@ -263,17 +291,17 @@ class TheDepths(unittest.TestCase):
             def normalAt(self, u, v):
                 return (0.0, 0.0, 1.0)
 
-        passes = pathgen.generate_passes(Valley(), parameters(rows=1, points_per_row=5, tool_radius=3.0))
+        passes = pathgen.generate_passes(Valley(), parameters(rows=1, points_per_row=5, tip_radius=3.0))
         self.assertEqual([0.0, 40.0, 0.0, 40.0, 0.0], [l.surface_point[2] for l in passes[0]])
-        kept = pathgen.clip_to_depths(passes, -1.0, 10.0, 3.0)
+        kept = pathgen.clip_to_depths(passes, -1.0, 10.0)
         self.assertEqual([], kept, "two points apiece are not worth cutting on their own")
-        kept = pathgen.clip_to_depths(passes, 30.0, 50.0, 3.0)
+        kept = pathgen.clip_to_depths(passes, 30.0, 50.0)
         self.assertEqual([], kept, "and neither is one point apiece")
 
     def test_the_edge_of_the_range_counts_as_inside(self):
         #the flat face: every tip sits at exactly zero, which a range of zero to zero has to keep
-        passes = pathgen.generate_passes(Plane(), parameters(rows=1, points_per_row=4, tool_radius=3.0))
-        kept = pathgen.clip_to_depths(passes, 0.0, 0.0, 3.0)
+        passes = pathgen.generate_passes(Plane(), parameters(rows=1, points_per_row=4, tip_radius=3.0))
+        kept = pathgen.clip_to_depths(passes, 0.0, 0.0)
         self.assertEqual(1, len(kept))
         self.assertEqual(4, len(kept[0]))
 
@@ -291,20 +319,20 @@ class TheLayers(unittest.TestCase):
             def normalAt(self, u, v):
                 return (0.0, 0.0, 1.0)
 
-        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tool_radius=3.0))
+        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tip_radius=3.0))
 
     def test_a_step_down_that_covers_the_range_is_one_band(self):
         passes = self.slope()
         self.assertEqual([[0.0, 25.0, 50.0, 75.0, 100.0]],
-                         [[l.u for l in one] for one in pathgen.in_layers(passes, 200.0, 0.0, 100.0, 3.0)])
+                         [[l.u for l in one] for one in pathgen.in_layers(passes, 200.0, 0.0, 100.0)])
 
     def test_no_step_down_at_all_is_one_band(self):
         passes = self.slope()
-        self.assertEqual(1, len(pathgen.in_layers(passes, 0.0, 0.0, 100.0, 3.0)))
+        self.assertEqual(1, len(pathgen.in_layers(passes, 0.0, 0.0, 100.0)))
 
     def test_the_bands_come_down_from_the_top_and_each_point_is_cut_once(self):
         passes = self.slope()                       # tips at z = 0, 25, 50, 75, 100
-        layers = pathgen.in_layers(passes, 50.0, 0.0, 100.0, 3.0)
+        layers = pathgen.in_layers(passes, 50.0, 0.0, 100.0)
         #the top band holds what is above 50, the bottom band the rest; 50 itself is on the boundary
         #of both and is kept by the band that reaches it first, coming down
         points = [[l.u for l in one] for one in layers]
@@ -314,7 +342,7 @@ class TheLayers(unittest.TestCase):
 
     def test_a_band_with_too_little_in_it_is_dropped_like_any_other_pass(self):
         passes = self.slope()
-        layers = pathgen.in_layers(passes, 10.0, 0.0, 100.0, 3.0)
+        layers = pathgen.in_layers(passes, 10.0, 0.0, 100.0)
         for one in layers:
             self.assertGreaterEqual(len(one), 2)
 
@@ -343,3 +371,7 @@ class TheStartPoint(unittest.TestCase):
 
     def test_nothing_to_arrange_is_not_an_error(self):
         self.assertEqual([], pathgen.start_near([], (0.0, 0.0, 0.0)))
+
+
+if __name__ == "__main__":
+    unittest.main()

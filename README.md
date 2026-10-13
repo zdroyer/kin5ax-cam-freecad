@@ -1,7 +1,7 @@
 # kin5axcam — 3D Surface (5axis) for the CAM workbench of FreeCAD
 
 A new operation in FreeCAD's CAM workbench: a zigzag over the parameter space of **one face**, cut
-with a **ball nose** tool. It is the toolpath source for the five-axis postprocessor of
+with **any shape of tool**. It is the toolpath source for the five-axis postprocessor of
 [kin5ax](../kin5ax/), built in three stages:
 
 | stage | the tool axis | state |
@@ -16,18 +16,28 @@ which is unambiguous.
 
 ## The point the path carries
 
-**The centre of the ball, not the tip of the tool.** The surface point moved one tool radius along
-the surface normal. That is the programmed point of a ball nose tool in cutter location data and the
-point kin5ax solves for, so the path feeds the five-axis postprocessor with nothing in between.
+**The tip of the tool**, which is the point a control programs, so the path goes to an ordinary
+postprocessor as it is and the picture in the 3D view sits where the tool will be.
 
-It also means **an ordinary three-axis postprocessor, which expects the tip, cuts one radius too
-high**, and the path drawn in the 3D view floats one radius above the surface. Both are the price of
-one convention through the whole chain. A property to write tip coordinates instead would be a small
-addition if a stock post has to be used.
+Where the tip goes is worked out from the sphere at the end of the tool. The surface point moved one
+**tip radius** along the normal is the centre of that sphere, placed where the sphere touches the
+surface at that point, and the tip is one tip radius down the tool axis from the centre. The tip
+radius comes off the tool:
 
-Moving the centre along the normal puts the ball exactly on the surface at the point it came from.
-It says nothing about the rest of the ball, so in a concave corner tighter than the tool radius the
-tool still gouges — the usual limit of a point-by-point offset.
+| the tool | its tip radius |
+|---|---|
+| ball nose, tapered ball nose | half the diameter |
+| bull nose, radius — anything with a `CornerRadius` | that corner radius |
+| end mill, V bit, chamfer, drill, a tool that does not say what it is | zero |
+
+A tip radius of zero puts the tip straight on the surface point, so a flat-ended tool cuts the
+surface as it is. A ball nose tool follows a curved surface the closest, having the most roundness
+to offset — which is a reason to pick one, not a reason for the operation to insist on one.
+
+The sphere touches the surface exactly at the point it came from, and nothing is promised about the
+rest of the tool: in a concave corner tighter than the tip radius the tool gouges, and the flat
+bottom of an end mill digs into the uphill side of a slope. That is the usual limit of a
+point-by-point offset, and a drop-cutter test against the whole tool is what would fix it.
 
 ## What the operation does
 
@@ -53,7 +63,7 @@ The task dialog has the pages any operation has: **Base Geometry** to pick the f
 the step down, **Heights**, a **start point**, and the tool controller and the coolant on the page of
 the operation itself.
 
-The depths mean what they say: the tip of the ball is kept between the final and the start depth, and
+The depths mean what they say: the tip of the tool is kept between the final and the start depth, and
 a pass that leaves the range comes apart there, so the tool lifts over what it may not cut rather
 than dragging through it. The depths the operation suggests are the top and the bottom of the face,
 so by default nothing is held back.
@@ -70,8 +80,9 @@ is kept as it is and only its direction is decided, by whichever of its two ends
 Not here: a finish depth. That is the depth of the last pass of a roughing sequence, and this
 operation follows the surface, so its last band is the finish already.
 
-The operation refuses, with a message in the report view rather than a silent wrong path: a tool
-that is not a ball nose one, no face, more than one face, and parameters that cannot make a path.
+The operation refuses, with a message in the report view rather than a silent wrong path: no tool,
+a ball nose tool of no diameter, no face, more than one face, and parameters that cannot make a
+path.
 
 ## Installing it
 
@@ -160,13 +171,15 @@ End** bit of FreeCAD's own library, and the operation, and prints what came out.
 
 | | the box, 100 x 50 x 10 | the hemisphere, radius 20 |
 |---|---|---|
-| every cutting move | `Z 13.000` - the top at 10 plus the ball radius 3 | - |
-| every ball centre | - | 23.000 from the middle: 20 plus 3 |
-| in the 3D view | the path floats one radius above the face | a dome of passes standing off the surface |
+| every cutting move | `Z 10.000` - the face itself, whatever the tool | - |
+| the highest move | - | `Z 20.000`, the top of the dome |
+| in the 3D view | the path lies on the face | a dome of passes on the surface |
 
-That the path floats above the surface is the ball centre convention, not a fault. Switch
-`InvertNormal` on and it drops to one radius *under* the face, which is the same thing from the
-other side.
+On the hemisphere the moves run down to about `Z 0.273` rather than to zero: the ball of a tool
+standing up touches the steep part of the dome with its side, so its tip is below the point it is
+cutting, and the final depth — the bottom of the face — cuts that dip off. Lowering the final depth
+brings those moves back. Switch `InvertNormal` on and the tool works the other side of the face
+instead.
 
 The same script runs without a window, which is the quickest check that nothing is broken:
 
@@ -183,9 +196,9 @@ The same script runs without a window, which is the quickest check that nothing 
    (5axis)* on it. An addon cannot add a button to a toolbar it does not own, which is why this is
    by hand.
 4. Create a **Job** on the shape.
-5. In the job's **Tools**, add the **6 mm Ball End** bit from the library. Worth trying the other
-   way first: leave the default 5 mm end mill selected, run the operation, and the report view says
-   what is wrong while the path stays empty.
+5. In the job's **Tools**, add the **6 mm Ball End** bit from the library — or leave the default
+   end mill, which cuts too, with its tip on the face rather than the ball of a round end rolling
+   over it.
 6. Select the face to cut - one face, the top one.
 7. Run the command. The task panel asks for the passes, the points per pass, which parameter they
    sweep, there and back, and which side of the face. Change a field and the path follows.
@@ -219,19 +232,19 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-47 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+51 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
-operation and reads the commands that come out. Without FreeCAD those thirteen are skipped and the
-other thirty-four still run.
+operation and reads the commands that come out. Without FreeCAD those fifteen are skipped and the
+other thirty-six still run.
 
 ## Where things are
 
 | | |
 |---|---|
-| `kin5axcam/pathgen.py` | the geometry: the zigzag and the ball centre. No FreeCAD in it |
+| `kin5axcam/pathgen.py` | the geometry: the zigzag and the tip of the tool. No FreeCAD in it |
 | `kin5axcam/surface5axis.py` | the operation: properties, the face, the tool, the commands |
 | `kin5axcam/surface5axis_gui.py` | the task panel, the view provider and the command |
 | `InitGui.py` | two lines: hands the work to `kin5axcam/startup.py` |

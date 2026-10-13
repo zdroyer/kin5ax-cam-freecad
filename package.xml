@@ -3,9 +3,9 @@
   <name>kin5axcam</name>
   <description>
     A 3D Surface (5axis) operation for the CAM workbench: a zigzag over the parameter space of one
-    face, cut with a ball nose tool. The path carries the centre of the ball, which is the
-    programmed point of a cutter location file, so it feeds the kin5ax five-axis postprocessor
-    directly. The orientation of the tool follows in the next versions.
+    face, cut with any shape of tool. The path carries the tip of the tool, worked out from the
+    roundness at the end of it. The orientation of the tool, and with it the five-axis output that
+    feeds the kin5ax postprocessor, follows in the next versions.
   </description>
   <version>0.1.0</version>
   <date>2026-10-12</date>

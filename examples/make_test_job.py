@@ -10,7 +10,7 @@ From the Python console of FreeCAD, with the path of this addon:
     sys.path.insert(0, ROOT)
     exec(open(ROOT + r"\\examples\\make_test_job.py").read())
     build("box")                # a flat top face: every cutting move at one height
-    build("hemisphere")         # a curved face: the ball centre on a bigger sphere
+    build("hemisphere")         # a curved face: the tip taken round a bigger sphere
 
 Or headless, which proves the same numbers without a window:
 
@@ -156,8 +156,14 @@ def report(operation, model, face):
         p = command.Parameters
         print("    X %9.3f  Y %9.3f  Z %9.3f" % (p["X"], p["Y"], p["Z"]))
     print("")
-    print("What to check: the path carries the centre of the ball, so it stands one tool radius")
-    print("(%.3f) off the surface everywhere." % (0.5 * tool.Diameter.Value,))
+    radius = 0.5 * tool.Diameter.Value
+    print("What to check: the path carries the tip of the tool, so on the flat top of the box every")
+    print("cutting move is at the height of that face - %.3f, not %.3f." % (BOX[2], BOX[2] + radius))
+    print("On the hemisphere the centre of the ball runs on a sphere of %.3f + %.3f and the tip is"
+          % (HEMISPHERE_RADIUS, radius))
+    print("%.3f below the centre, so it is on the face at the top of the dome and dips under it" % (radius,))
+    print("towards the rim, where a tool standing up can only touch with the side of its ball. The")
+    print("final depth cuts that dip off, and lowering it brings those moves back.")
     print("")
 
 

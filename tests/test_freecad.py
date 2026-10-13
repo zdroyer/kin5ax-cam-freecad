@@ -52,25 +52,27 @@ class TheGeneratorAgainstARealFace(unittest.TestCase):
         sphere.Radius = 20.0
         self.document.recompute()
         face = sphere.Shape.Faces[0]
-        parameters = pathgen.ZigZagParameters(tool_radius=3.0, rows=5, points_per_row=9)
+        radius = 3.0
+        parameters = pathgen.ZigZagParameters(tip_radius=radius, rows=5, points_per_row=9)
         passes = pathgen.generate_passes(face, parameters)
         self.assertGreater(len(passes), 0)
         for one in passes:
             for location in one:
-                #the ball centre of a sphere of 20 cut with a ball of 3 is 23 from the middle
-                distance = math.sqrt(sum(c * c for c in location.point))
-                self.assertAlmostEqual(23.0, distance, delta=1e-9)
+                #the ball of a 3 mm radius on a sphere of 20 has its centre 23 from the middle, and
+                #the tip of a tool standing up is that centre with 3 taken off its height
+                centre = (location.point[0], location.point[1], location.point[2] + radius)
+                self.assertAlmostEqual(23.0, math.sqrt(sum(c * c for c in centre)), delta=1e-9)
                 self.assertEqual(pathgen.VERTICAL_AXIS, location.axis)
 
-    def test_a_flat_face_one_radius_below_the_path(self):
+    def test_a_flat_face_is_cut_at_its_own_height(self):
         plane = Part.makePlane(100, 50)
-        parameters = pathgen.ZigZagParameters(tool_radius=2.5, rows=3, points_per_row=4)
+        parameters = pathgen.ZigZagParameters(tip_radius=2.5, rows=3, points_per_row=4)
         passes = pathgen.generate_passes(plane, parameters)
         self.assertEqual(3, len(passes))
         for one in passes:
             self.assertEqual(4, len(one))
             for location in one:
-                self.assertAlmostEqual(2.5, location.point[2], delta=1e-12)
+                self.assertAlmostEqual(0.0, location.point[2], delta=1e-12)
 
     def test_a_hole_in_the_face_breaks_the_passes(self):
         """A trimmed face reports its hole through isPartOfDomain, which is what splits a pass."""
@@ -80,7 +82,7 @@ class TheGeneratorAgainstARealFace(unittest.TestCase):
         self.assertTrue(face.isPartOfDomain(5, 5))
         self.assertFalse(face.isPartOfDomain(50, 25))
 
-        parameters = pathgen.ZigZagParameters(tool_radius=2.0, rows=3, points_per_row=5)
+        parameters = pathgen.ZigZagParameters(tip_radius=2.0, rows=3, points_per_row=5)
         passes = pathgen.generate_passes(face, parameters)
         self.assertGreater(len(passes), 3, "the middle row has to come apart at the hole")
         for one in passes:
@@ -91,7 +93,7 @@ class TheGeneratorAgainstARealFace(unittest.TestCase):
 
 @needs_freecad
 class TheOperation(unittest.TestCase):
-    """A job, a ball nose tool, a face, and the commands that come out."""
+    """A job, a tool, a face, and the commands that come out."""
 
     #the box the operation works on, and the tool it cuts with
     LENGTH, WIDTH, HEIGHT = 100.0, 50.0, 10.0
@@ -154,9 +156,9 @@ class TheOperation(unittest.TestCase):
         moves = self.cuttingMoves(operation)
         #three passes of four points: three moves in each pass after the plunge into the first point
         self.assertEqual(self.ROWS * (self.POINTS - 1), len(moves))
-        #the top of the box is at 10 and the ball of a 6 mm tool has a radius of 3
+        #the commands carry the tip, and on a level face the tip of any tool is on the face
         for move in moves:
-            self.assertAlmostEqual(self.HEIGHT + 0.5 * self.DIAMETER, move.Parameters["Z"], delta=1e-9)
+            self.assertAlmostEqual(self.HEIGHT, move.Parameters["Z"], delta=1e-9)
             self.assertGreaterEqual(move.Parameters["X"], -1e-9)
             self.assertLessEqual(move.Parameters["X"], self.LENGTH + 1e-9)
 
@@ -182,7 +184,7 @@ class TheOperation(unittest.TestCase):
         plunges = [c for c in operation.Path.Commands if c.Name == "G1" and "X" not in c.Parameters]
         self.assertEqual(self.ROWS, len(plunges))
         for plunge in plunges:
-            self.assertAlmostEqual(self.HEIGHT + 0.5 * self.DIAMETER, plunge.Parameters["Z"], delta=1e-9)
+            self.assertAlmostEqual(self.HEIGHT, plunge.Parameters["Z"], delta=1e-9)
 
     def test_the_operation_offers_what_the_task_dialog_needs(self):
         """The pages of the task dialog come from the features, so these are what puts them there."""
@@ -248,13 +250,54 @@ class TheOperation(unittest.TestCase):
         self.assertGreater(turned["X"], 0.5 * self.LENGTH,
                            "asked to start at the far corner, it begins there")
 
-    def test_a_tool_that_is_not_a_ball_nose_one_cuts_nothing(self):
+    def test_any_shape_of_tool_cuts(self):
+        """The shape decides the radius of the sphere at the end of the tool, and nothing else.
+
+        On the level top of the box that radius makes no difference to the path -
+        a ball touching a level face is straight under its own centre, whatever
+        its size - so what this says is that none of these is turned away.
+        """
+        from kin5axcam import surface5axis
+
+        for shape, radius in (("Endmill", 0.0),
+                              ("Ballend", 0.5 * self.DIAMETER),
+                              ("VBit", 0.0),
+                              ("Drill", 0.0)):
+            tool = self.toolController.Tool
+            tool.ShapeType = shape
+            tool.Diameter = self.DIAMETER
+            self.document.recompute()
+            operation = self.createOperation()
+            self.assertEqual(radius, operation.Proxy.tipRadius(operation),
+                             "the tip radius of a %s" % shape)
+            moves = self.cuttingMoves(operation)
+            self.assertEqual(self.ROWS * (self.POINTS - 1), len(moves),
+                             "a %s cut nothing" % shape)
+            for move in moves:
+                self.assertAlmostEqual(self.HEIGHT, move.Parameters["Z"], delta=1e-9)
+            self.document.removeObject(operation.Name)
+            self.document.recompute()
+
+    def test_a_rounded_corner_is_the_radius_of_the_tip(self):
+        """A bull nose tool says what its corner radius is, and that is the sphere at its end."""
         tool = self.toolController.Tool
-        tool.ShapeType = "Endmill"
+        tool.ShapeType = "Bullnose"
+        tool.Diameter = self.DIAMETER
+        if not hasattr(tool, "CornerRadius"):
+            tool.addProperty("App::PropertyLength", "CornerRadius", "Bit", "the rounded corner")
+        tool.CornerRadius = 1.5
         self.document.recompute()
         operation = self.createOperation()
-        self.assertEqual([], self.cuttingMoves(operation),
-                         "an end mill has no ball to cut a surface with")
+        self.assertAlmostEqual(1.5, operation.Proxy.tipRadius(operation), delta=1e-12)
+
+    def test_a_ball_nose_tool_of_no_width_has_no_ball(self):
+        tool = self.toolController.Tool
+        tool.ShapeType = "Ballend"
+        tool.Diameter = 0.0
+        self.document.recompute()
+        operation = self.createOperation()
+        self.assertIsNone(operation.Proxy.tipRadius(operation))
+        self.assertEqual([], self.cuttingMoves(operation))
 
     def test_without_a_face_there_is_no_path(self):
         self.makeBitABallNose()

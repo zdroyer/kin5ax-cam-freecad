@@ -4,15 +4,15 @@ This is the FreeCAD side of it - the properties, the face, the tool and the
 commands. The geometry is in pathgen.py, which knows nothing about FreeCAD.
 
 Stage one, which is what this is: the tool stands up, as in any three-axis
-operation, and the path is the ball centre of a ball nose tool moved one tool
-radius along the surface normal. The orientation of the tool and the two angles
-that lean it come in the stages after this one, and will ride in the commands as
-I, J and K.
+operation, and the commands carry the tip of the tool, which is what a control
+programs. The orientation of the tool and the two angles that lean it come in the
+stages after this one, and will ride in the commands as I, J and K.
 
-Mind the point the commands carry: it is the centre of the ball, not the tip of
-the tool. That is the programmed point of a ball nose tool in cutter location
-data and in kin5ax. Handed to an ordinary three-axis postprocessor, which
-expects the tip, it cuts one radius too high.
+Any tool cuts here. What the shape of the tool decides is the radius of the
+sphere at its end, which is how far along the normal the surface point moves
+before the tip is taken one radius back down the axis - see pathgen.py. A ball
+nose tool follows a curved surface the closest, as it has the most roundness to
+offset; an end mill has none, so its tip lands on the surface point itself.
 """
 
 import FreeCAD
@@ -32,8 +32,9 @@ __author__ = "kin5ax"
 
 PROPERTY_GROUP = "Surface5Axis"
 
-#the only shape of tool this operation cuts with
-BALL_NOSE = "ballend"
+#the shapes of tool whose end is a half sphere of the full diameter: the plain ball nose one and the
+#tapered one, whose taper is above the ball and does not change it
+BALL_NOSED_SHAPES = ("ballend", "ballnose", "taperedballnose")
 
 
 def tool_shape_name(tool):
@@ -55,7 +56,7 @@ def quantity_value(value):
 
 
 class ObjectSurface5Axis(PathOp.ObjectOp):
-    """A zigzag over the U,V space of a single face, cut with the ball of a ball nose tool."""
+    """A zigzag over the U,V space of a single face, the commands carrying the tip of the tool."""
 
     def opFeatures(self, obj):
         """What this operation has, which is also what the task dialog is made of.
@@ -196,29 +197,33 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             return None
         return shape
 
-    def ballRadius(self, obj):
-        """The radius of the ball of the tool, or None when the tool is not a ball nose one."""
+    def tipRadius(self, obj):
+        """The radius of the sphere at the end of the tool, or None when there is no tool to ask.
+
+        A bull nose tool, and any other the library builds from a shape with a
+        rounded corner, says so in CornerRadius. A ball nose one is a corner
+        radius of half its diameter, which it does not spell out. Anything else -
+        an end mill, a V bit, a drill, a tool whose shape does not say what it is
+        - has nothing rounded to offset, and a radius of zero puts the tip of it
+        on the surface.
+        """
         tool = self.tool
         if tool is None:
             Path.Log.error(
                 translate("Surface5Axis", "%s has no tool: pick a tool controller") % obj.Label)
             return None
-        shape = tool_shape_name(tool)
-        if shape and shape != BALL_NOSE:
-            Path.Log.error(
-                translate("Surface5Axis", "%s cuts with the ball of a ball nose tool, and the tool "
-                          "of %s is a %s one") % (obj.Label, obj.Label, shape))
-            return None
-        if not shape:
-            Path.Log.warning(
-                translate("Surface5Axis", "the shape of the tool of %s does not say what it is; it "
-                          "is taken for a ball nose tool of its diameter") % obj.Label)
-        diameter = quantity_value(getattr(tool, "Diameter", 0.0))
-        if diameter <= 0.0:
-            Path.Log.error(
-                translate("Surface5Axis", "the tool of %s has no diameter") % obj.Label)
-            return None
-        return 0.5 * diameter
+        corner = quantity_value(getattr(tool, "CornerRadius", 0.0))
+        if corner > 0.0:
+            return corner
+        if tool_shape_name(tool) in BALL_NOSED_SHAPES:
+            diameter = quantity_value(getattr(tool, "Diameter", 0.0))
+            if diameter <= 0.0:
+                Path.Log.error(
+                    translate("Surface5Axis", "the ball nose tool of %s has no diameter, so the "
+                              "ball it cuts with has no size") % obj.Label)
+                return None
+            return 0.5 * diameter
+        return 0.0
 
     def opExecute(self, obj):
         """The passes of the zigzag, as commands."""
@@ -226,11 +231,11 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         face = self.theFace(obj)
         if face is None:
             return
-        radius = self.ballRadius(obj)
+        radius = self.tipRadius(obj)
         if radius is None:
             return
         parameters = pathgen.ZigZagParameters(
-            tool_radius=radius,
+            tip_radius=radius,
             rows=obj.Rows,
             points_per_row=obj.PointsPerRow,
             direction=obj.PathDirection,
@@ -244,7 +249,7 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             return
         passes = pathgen.in_layers(passes, quantity_value(obj.StepDown),
                                    quantity_value(obj.FinalDepth),
-                                   quantity_value(obj.StartDepth), radius)
+                                   quantity_value(obj.StartDepth))
         if getattr(obj, "UseStartPoint", False):
             start = obj.StartPoint
             passes = pathgen.start_near(passes, (start.x, start.y, start.z))

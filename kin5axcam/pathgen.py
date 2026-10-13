@@ -12,17 +12,23 @@ and ``z``, or any sequence of three numbers. ``Part.Face`` answers all four, so
 the operation hands one straight over; the tests hand over an analytic sphere
 and a plane, whose answers are known on paper.
 
-The point of a location is **the centre of the ball of the tool**: the surface
-point moved one tool radius along the normal. That is what a cutter location
-file carries for a ball nose tool and what kin5ax calls the programmed point -
-not the tip. A path of ball centres handed to an ordinary three-axis
-postprocessor cuts one radius too high.
+The point of a location is **where the tip of the tool goes**, which is the point
+a control programs and what the G-code of this operation carries.
 
-Moving the ball centre along the normal puts the ball exactly on the surface at
-the point it was computed from. It says nothing about the rest of the ball, so
-in a concave corner tighter than the tool radius the tool still gouges; that is
-the usual limit of a point-by-point offset and no surface operation this simple
-avoids it.
+It is worked out from the sphere at the end of the tool: the surface point moved
+one tip radius along the normal is the centre of that sphere, put where the
+sphere touches the surface at that point, and the tip is one tip radius down the
+tool axis from the centre. The tip radius is half the diameter of a ball nose
+tool, the corner radius of a bull nose one, and zero for an end mill, a V bit or
+a drill - and with a tip radius of zero the tip goes on the surface point
+itself.
+
+The sphere touches the surface exactly at the point it was computed from, and
+nothing is promised about the rest of the tool. In a concave corner tighter than
+the tip radius the tool gouges, and the flat bottom of an end mill digs into the
+uphill side of a slope, because a single contact point knows nothing of it. That
+is the usual limit of a point-by-point offset and no surface operation this
+simple avoids it.
 """
 
 import math
@@ -42,7 +48,7 @@ def as_xyz(v):
 
 
 class Location(object):
-    """One place the tool is asked to be: where its ball centre goes, and which way its axis points.
+    """One place the tool is asked to be: where its tip goes, and which way its axis points.
 
     ``point`` and ``axis`` are tuples of three floats, ``axis`` a unit vector.
     ``u`` and ``v`` are the parameters of the surface point this came from, kept
@@ -56,7 +62,7 @@ class Location(object):
         self.axis = axis
         self.u = u
         self.v = v
-        self.surface_point = surface_point      #where the ball touches the surface
+        self.surface_point = surface_point      #where the tool touches the surface
         self.normal = normal                    #the surface normal there, a unit vector
 
     def __repr__(self):
@@ -77,9 +83,11 @@ class ZigZagParameters(object):
     runs the same way and the tool returns through the air.
     """
 
-    def __init__(self, tool_radius, rows=20, points_per_row=60, direction="U",
+    def __init__(self, tip_radius, rows=20, points_per_row=60, direction="U",
                  zigzag=True, flip_normal=False):
-        self.tool_radius = float(tool_radius)
+        #the radius of the sphere at the end of the tool: half the diameter of a ball nose tool, the
+        #corner radius of a bull nose one, zero for a tool whose end has no roundness to it
+        self.tip_radius = float(tip_radius)
         self.rows = int(rows)
         self.points_per_row = int(points_per_row)
         self.direction = str(direction).upper()
@@ -88,9 +96,8 @@ class ZigZagParameters(object):
 
     def check(self):
         """Raises ValueError when these parameters cannot make a path."""
-        if self.tool_radius <= 0.0:
-            raise ValueError("the tool radius has to be greater than zero: this operation cuts with "
-                             "the ball of a ball nose tool")
+        if self.tip_radius < 0.0:
+            raise ValueError("a tip radius cannot be negative: %r" % self.tip_radius)
         if self.rows < 1:
             raise ValueError("a path needs at least one pass")
         if self.points_per_row < 2:
@@ -124,18 +131,17 @@ def location_at(surface, u, v, params):
     if length < MINIMUM_NORMAL_LENGTH:
         return None
     normal = (normal[0] / length, normal[1] / length, normal[2] / length)
-    radius = params.tool_radius
+    radius = params.tip_radius
+    axis = VERTICAL_AXIS
+    #the centre of the sphere at the end of the tool, where that sphere touches the surface here
     centre = (point[0] + radius * normal[0],
               point[1] + radius * normal[1],
               point[2] + radius * normal[2])
-    return Location(centre, VERTICAL_AXIS, u, v, point, normal)
-
-
-def tip_of(location, tool_radius):
-    """Where the tip of the ball is: one tool radius down the axis from the centre of the ball."""
-    return (location.point[0] - tool_radius * location.axis[0],
-            location.point[1] - tool_radius * location.axis[1],
-            location.point[2] - tool_radius * location.axis[2])
+    #and the tip, one radius down the axis of the tool from that centre
+    tip = (centre[0] - radius * axis[0],
+           centre[1] - radius * axis[1],
+           centre[2] - radius * axis[2])
+    return Location(tip, axis, u, v, point, normal)
 
 
 def keep_if_worth_cutting(passes, current):
@@ -145,12 +151,12 @@ def keep_if_worth_cutting(passes, current):
     return []
 
 
-def clip_to_depths(passes, bottom, top, tool_radius, tolerance=1.0e-7):
+def clip_to_depths(passes, bottom, top, tolerance=1.0e-7):
     """The passes with everything outside the depth range taken out.
 
     bottom and top are the heights the tip of the tool may work between, which is what the final and
-    the start depth of an operation mean. The tip rather than the point of the path: the path carries
-    the centre of the ball, and a depth is about how deep the tool goes.
+    the start depth of an operation mean - and the tip is what a location carries, so the height of
+    the point is the height to compare.
 
     A pass that leaves the range comes apart the way one that leaves the face does, so the tool is
     lifted over what it may not cut rather than dragged through it.
@@ -159,7 +165,7 @@ def clip_to_depths(passes, bottom, top, tool_radius, tolerance=1.0e-7):
     for one in passes:
         current = []
         for location in one:
-            z = tip_of(location, tool_radius)[2]
+            z = location.point[2]
             if z < bottom - tolerance or z > top + tolerance:
                 current = keep_if_worth_cutting(kept, current)
                 continue
@@ -168,7 +174,7 @@ def clip_to_depths(passes, bottom, top, tool_radius, tolerance=1.0e-7):
     return kept
 
 
-def in_layers(passes, step_down, bottom, top, tool_radius):
+def in_layers(passes, step_down, bottom, top):
     """The passes cut in bands from the top down, none of them deeper than step_down.
 
     A surface operation that takes the whole depth in one go asks the tool to plunge the full height
@@ -181,12 +187,12 @@ def in_layers(passes, step_down, bottom, top, tool_radius):
     which is the path as it was.
     """
     if step_down <= 0.0 or top - bottom <= step_down:
-        return clip_to_depths(passes, bottom, top, tool_radius)
+        return clip_to_depths(passes, bottom, top)
     layers = []
     level = top
     while level > bottom:
         lower = max(bottom, level - step_down)
-        layers.extend(clip_to_depths(passes, lower, level, tool_radius))
+        layers.extend(clip_to_depths(passes, lower, level))
         level = lower
     return layers
 

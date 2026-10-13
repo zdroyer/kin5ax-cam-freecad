@@ -67,7 +67,8 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         #the tool up and to keep it in step when the job's tools change.
         form.toolController = QtGui.QComboBox(form)
         form.toolController.setToolTip(translate(
-            "Surface5Axis", "The tool this operation cuts with. It has to be a ball nose one."))
+            "Surface5Axis", "The tool this operation cuts with. Any shape of tool will do; a "
+            "ball nose one follows a curved surface the closest."))
         layout.addRow(translate("Surface5Axis", "Tool controller"), form.toolController)
 
         form.coolantController = QtGui.QComboBox(form)
@@ -207,7 +208,7 @@ Resources = PathOpGui.CommandResources(
     QT_TRANSLATE_NOOP("CAM_Surface5Axis", "3D Surface (5axis)"),
     None,
     QT_TRANSLATE_NOOP("CAM_Surface5Axis",
-                      "Zigzag over the U,V space of a single face, cut with a ball nose tool"),
+                      "Zigzag over the U,V space of a single face"),
 )
 
 #what PathOpGui.SetupOperation would do, done here because the command is this one and not the generic

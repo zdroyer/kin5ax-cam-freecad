@@ -49,6 +49,16 @@ to be at least two points, since one point cuts nothing.
 | `ZigZag` | cut there and back, rather than returning through the air |
 | `InvertNormal` | put the tool on the other side of the face |
 
+The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths**,
+**Heights**, and the tool controller and the coolant on the page of the operation itself. The depths
+mean what they say: the tip of the ball is kept between the final and the start depth, and a pass
+that leaves the range comes apart there, so the tool lifts over what it may not cut rather than
+dragging through it. The depths the operation suggests are the top and the bottom of the face, so by
+default nothing is held back.
+
+Not here, and not pretended at: a step down (this is a finishing pass in one go, not a roughing
+strategy) and a start point.
+
 The operation refuses, with a message in the report view rather than a silent wrong path: a tool
 that is not a ball nose one, no face, more than one face, and parameters that cannot make a path.
 
@@ -103,9 +113,11 @@ rather than as silence. The registration waits for the CAM workbench because nei
 signal to wait on exists while FreeCAD is still starting; a report view that says `not registered
 yet ... waiting for the CAM workbench` has not given up, it retries on every workbench change.
 
-The command comes with its own icon. An addon cannot add a button to the toolbar of a workbench it
-does not own, so put it on one through **Tools -> Customize -> Toolbars**, or run it from the console
-with a CAM Job active:
+The command comes with its own icon. It cannot be added to the **standard** CAM toolbars: those
+belong to the CAM workbench and nothing outside it may change them - that is FreeCAD, not this addon.
+What you can do is make a toolbar of your own through **Tools -> Customize -> Toolbars** with the CAM
+workbench chosen on the right, and put the command on that; it then appears whenever CAM is active.
+Or run it from the console with a CAM Job active:
 
 ```python
 FreeCADGui.runCommand("CAM_Surface5Axis")
@@ -187,7 +199,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-29 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+37 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

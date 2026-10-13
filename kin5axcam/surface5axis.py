@@ -58,13 +58,15 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
     """A zigzag over the U,V space of a single face, cut with the ball of a ball nose tool."""
 
     def opFeatures(self, obj):
-        """The tool, the heights to retract to, coolant, and one face to work on.
+        """The tool, the depths, the heights to retract to, coolant, and one face to work on.
 
-        No depths: the face says where the material is, so a start and a final
-        depth would only be a second, contradictory opinion about it.
+        These are the features that put the standard pages in the task dialog:
+        the base geometry page to pick the face, the depths page, the heights
+        page, and the tool and coolant on the page of the operation itself.
         """
         return (
             PathOp.FeatureTool
+            | PathOp.FeatureDepths
             | PathOp.FeatureHeights
             | PathOp.FeatureCoolant
             | PathOp.FeatureBaseFaces
@@ -112,32 +114,54 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             return True
         return base not in self.model
 
-    def theFace(self, obj):
-        """The one face this operation works on, or None with a message saying why there is none."""
+    def opUpdateDepths(self, obj):
+        """What the depths should be, left to the user to change: the top and bottom of the face.
+
+        A start depth above the face and a final depth below it would have the
+        operation cut nothing it would not cut anyway, so the face itself is the
+        honest suggestion.
+        """
+        face = self.theFace(obj, quiet=True)
+        if face is None:
+            return
+        obj.OpStartDepth = face.BoundBox.ZMax
+        obj.OpFinalDepth = face.BoundBox.ZMin
+
+    def theFace(self, obj, quiet=False):
+        """The one face this operation works on, or None with a message saying why there is none.
+
+        quiet: for the moments when there is no face yet and that is not news,
+        such as working out what the depths should be while the operation is
+        still being set up.
+        """
         faces = []
         for base, subs in obj.Base:
             for sub in subs:
                 if not sub.startswith("Face"):
-                    Path.Log.warning(
-                        translate("Surface5Axis", "%s is not a face and is ignored") % sub)
+                    if not quiet:
+                        Path.Log.warning(
+                            translate("Surface5Axis", "%s is not a face and is ignored") % sub)
                     continue
                 faces.append((base, sub))
         if not faces:
-            Path.Log.warning(
-                translate("Surface5Axis", "%s has no face to work on: pick one in Base Geometry")
-                % obj.Label)
+            if not quiet:
+                Path.Log.warning(
+                    translate("Surface5Axis", "%s has no face to work on: pick one in Base Geometry")
+                    % obj.Label)
             return None
         if len(faces) > 1:
-            Path.Log.error(
-                translate("Surface5Axis", "%s works on a single face, and %d are picked")
-                % (obj.Label, len(faces)))
+            if not quiet:
+                Path.Log.error(
+                    translate("Surface5Axis", "%s works on a single face, and %d are picked")
+                    % (obj.Label, len(faces)))
             return None
         base, sub = faces[0]
         shape = base.Shape.getElement(sub)
         if shape.ShapeType != "Face":
-            Path.Log.error(
-                translate("Surface5Axis", "%s of %s is a %s, not a face")
-                % (sub, base.Label, shape.ShapeType))
+            if not quiet:
+                Path.Log.error(
+                    translate("Surface5Axis", "%s of %s is a %s, not a face")
+                    % (sub, base.Label, shape.ShapeType))
             return None
         return shape
 
@@ -187,9 +211,12 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         except ValueError as problem:
             Path.Log.error("%s: %s" % (obj.Label, problem))
             return
+        passes = pathgen.clip_to_depths(passes, quantity_value(obj.FinalDepth),
+                                        quantity_value(obj.StartDepth), radius)
         if not passes:
             Path.Log.warning(
-                translate("Surface5Axis", "%s found nothing to cut on that face") % obj.Label)
+                translate("Surface5Axis", "%s found nothing to cut on that face between the final "
+                          "depth and the start depth") % obj.Label)
             return
         self.appendPasses(obj, passes)
 

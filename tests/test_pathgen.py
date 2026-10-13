@@ -219,3 +219,60 @@ class ParametersThatCannotMakeAPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheDepths(unittest.TestCase):
+    """clip_to_depths: what the tool may not reach is taken out, and the pass comes apart there."""
+
+    def passes_over_a_slope(self):
+        """A plane tilted so that the tip of the tool runs from z = 0 up to z = 100."""
+
+        class Slope(Plane):
+            def valueAt(self, u, v):
+                return (u, v, u)            # z rises with u
+
+            def normalAt(self, u, v):
+                return (0.0, 0.0, 1.0)      # straight up, so the tip is one radius below the centre
+
+        return pathgen.generate_passes(Slope(), parameters(rows=1, points_per_row=5, tool_radius=3.0))
+
+    def test_the_tip_is_a_radius_down_the_axis_from_the_centre(self):
+        passes = pathgen.generate_passes(Plane(), parameters(rows=1, points_per_row=2))
+        location = passes[0][0]
+        self.assertAlmostEqual(3.0, location.point[2], delta=1e-12)
+        self.assertAlmostEqual(0.0, pathgen.tip_of(location, 3.0)[2], delta=1e-12,
+                               msg="the tip of the ball sits on the surface")
+
+    def test_nothing_is_taken_out_when_the_range_holds_it_all(self):
+        passes = self.passes_over_a_slope()
+        kept = pathgen.clip_to_depths(passes, -1.0, 101.0, 3.0)
+        self.assertEqual([[l.u for l in one] for one in passes],
+                         [[l.u for l in one] for one in kept])
+
+    def test_what_is_too_deep_or_too_high_goes(self):
+        passes = self.passes_over_a_slope()          # tips at z = 0, 25, 50, 75, 100
+        kept = pathgen.clip_to_depths(passes, 20.0, 80.0, 3.0)
+        self.assertEqual([[25.0, 50.0, 75.0]], [[l.u for l in one] for one in kept])
+
+    def test_a_range_in_the_middle_breaks_the_pass_in_two(self):
+        #a surface that dips in the middle: the tips run 0, 40, 0, 40, 0 as u goes along
+        class Valley(Plane):
+            def valueAt(self, u, v):
+                return (u, v, 40.0 if (u / 25.0) % 2 == 1 else 0.0)
+
+            def normalAt(self, u, v):
+                return (0.0, 0.0, 1.0)
+
+        passes = pathgen.generate_passes(Valley(), parameters(rows=1, points_per_row=5, tool_radius=3.0))
+        self.assertEqual([0.0, 40.0, 0.0, 40.0, 0.0], [l.surface_point[2] for l in passes[0]])
+        kept = pathgen.clip_to_depths(passes, -1.0, 10.0, 3.0)
+        self.assertEqual([], kept, "two points apiece are not worth cutting on their own")
+        kept = pathgen.clip_to_depths(passes, 30.0, 50.0, 3.0)
+        self.assertEqual([], kept, "and neither is one point apiece")
+
+    def test_the_edge_of_the_range_counts_as_inside(self):
+        #the flat face: every tip sits at exactly zero, which a range of zero to zero has to keep
+        passes = pathgen.generate_passes(Plane(), parameters(rows=1, points_per_row=4, tool_radius=3.0))
+        kept = pathgen.clip_to_depths(passes, 0.0, 0.0, 3.0)
+        self.assertEqual(1, len(kept))
+        self.assertEqual(4, len(kept[0]))

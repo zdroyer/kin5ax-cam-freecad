@@ -131,6 +131,43 @@ def location_at(surface, u, v, params):
     return Location(centre, VERTICAL_AXIS, u, v, point, normal)
 
 
+def tip_of(location, tool_radius):
+    """Where the tip of the ball is: one tool radius down the axis from the centre of the ball."""
+    return (location.point[0] - tool_radius * location.axis[0],
+            location.point[1] - tool_radius * location.axis[1],
+            location.point[2] - tool_radius * location.axis[2])
+
+
+def keep_if_worth_cutting(passes, current):
+    """Adds a stretch to the passes when it is long enough to cut anything, and starts a new one."""
+    if len(current) > 1:
+        passes.append(current)
+    return []
+
+
+def clip_to_depths(passes, bottom, top, tool_radius, tolerance=1.0e-7):
+    """The passes with everything outside the depth range taken out.
+
+    bottom and top are the heights the tip of the tool may work between, which is what the final and
+    the start depth of an operation mean. The tip rather than the point of the path: the path carries
+    the centre of the ball, and a depth is about how deep the tool goes.
+
+    A pass that leaves the range comes apart the way one that leaves the face does, so the tool is
+    lifted over what it may not cut rather than dragged through it.
+    """
+    kept = []
+    for one in passes:
+        current = []
+        for location in one:
+            z = tip_of(location, tool_radius)[2]
+            if z < bottom - tolerance or z > top + tolerance:
+                current = keep_if_worth_cutting(kept, current)
+                continue
+            current.append(location)
+        keep_if_worth_cutting(kept, current)
+    return kept
+
+
 def generate_passes(surface, params):
     """The passes of a zigzag over the parameter space of one face.
 
@@ -161,11 +198,8 @@ def generate_passes(surface, params):
                 u, v = row_value, sweep_value
             location = location_at(surface, u, v, params)
             if location is None:
-                if len(current) > 1:
-                    passes.append(current)
-                current = []
+                current = keep_if_worth_cutting(passes, current)
                 continue
             current.append(location)
-        if len(current) > 1:
-            passes.append(current)
+        keep_if_worth_cutting(passes, current)
     return passes

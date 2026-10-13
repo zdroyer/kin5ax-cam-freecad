@@ -4,10 +4,14 @@ The form is built in code rather than loaded from a .ui file: there are five
 fields, and a file of Qt XML to keep in step with them would be the larger half
 of this module.
 
-Importing this module registers the command CAM_Surface5Axis with FreeCAD. It
-does not put it on a toolbar - an addon cannot add one to the toolbar of a
-workbench it does not own - so reach it through Tools, Customize, or from the
-Python console:
+The page carries the tool controller and the coolant, as every operation's page does. The rest of
+the task dialog - the base geometry page that picks the face, the depths, the heights - is put there
+by the task panel itself, from the features the operation declares in opFeatures.
+
+Importing this module registers the command CAM_Surface5Axis with FreeCAD. It does not put it on a
+toolbar: the toolbars of a workbench belong to that workbench and no command can be added to them
+from outside, so the way to have a button is Tools, Customize, Toolbars, and a toolbar of your own
+in the CAM workbench. Or run it from the Python console:
 
     FreeCADGui.runCommand("CAM_Surface5Axis")
 """
@@ -55,6 +59,19 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         form = QtGui.QWidget()
         layout = QtGui.QFormLayout(form)
 
+        #The tool and the coolant belong to the page of the operation, as they do in every other one.
+        #The combo box has to be called toolController: the base class looks for that name to wire
+        #the tool up and to keep it in step when the job's tools change.
+        form.toolController = QtGui.QComboBox(form)
+        form.toolController.setToolTip(translate(
+            "Surface5Axis", "The tool this operation cuts with. It has to be a ball nose one."))
+        layout.addRow(translate("Surface5Axis", "Tool controller"), form.toolController)
+
+        form.coolantController = QtGui.QComboBox(form)
+        form.coolantController.setToolTip(translate(
+            "Surface5Axis", "The coolant mode the job offers"))
+        layout.addRow(translate("Surface5Axis", "Coolant"), form.coolantController)
+
         self.rows = QtGui.QSpinBox(form)
         self.rows.setRange(1, 100000)
         self.rows.setToolTip(translate(
@@ -93,6 +110,8 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
 
     def getFields(self, obj):
         """The form into the operation."""
+        self.updateToolController(obj, self.form.toolController)
+        self.updateCoolant(obj, self.form.coolantController)
         if obj.Rows != self.rows.value():
             obj.Rows = self.rows.value()
         if obj.PointsPerRow != self.pointsPerRow.value():
@@ -107,6 +126,8 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
 
     def setFields(self, obj):
         """The operation into the form."""
+        self.setupToolController(obj, self.form.toolController)
+        self.setupCoolant(obj, self.form.coolantController)
         self.rows.setValue(obj.Rows)
         self.pointsPerRow.setValue(obj.PointsPerRow)
         index = self.pathDirection.findText(obj.PathDirection, QtCore.Qt.MatchFixedString)
@@ -116,7 +137,9 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         self.invertNormal.setChecked(obj.InvertNormal)
 
     def getSignalsForUpdate(self, obj):
+        #not the tool controller: the base class connects that one itself, by the name of the widget
         return [
+            self.form.coolantController.currentIndexChanged,
             self.rows.valueChanged,
             self.pointsPerRow.valueChanged,
             self.pathDirection.currentIndexChanged,

@@ -184,6 +184,38 @@ class TheOperation(unittest.TestCase):
         for plunge in plunges:
             self.assertAlmostEqual(self.HEIGHT + 0.5 * self.DIAMETER, plunge.Parameters["Z"], delta=1e-9)
 
+    def test_the_operation_offers_what_the_task_dialog_needs(self):
+        """The pages of the task dialog come from the features, so these are what puts them there."""
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        for name in ("ToolController", "CoolantMode", "StartDepth", "FinalDepth",
+                     "ClearanceHeight", "SafeHeight", "Base"):
+            self.assertTrue(hasattr(operation, name), "the operation has no %s" % name)
+
+    def test_the_depths_say_where_the_face_is(self):
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        #the top of the box, which is the only height this operation cuts at
+        self.assertAlmostEqual(self.HEIGHT, operation.OpStartDepth.Value, delta=1e-9)
+        self.assertAlmostEqual(self.HEIGHT, operation.OpFinalDepth.Value, delta=1e-9)
+
+    def test_the_depths_limit_what_is_cut(self):
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        self.assertGreater(len(self.cuttingMoves(operation)), 0)
+
+        #a start depth below the face puts the whole of it out of reach
+        operation.setExpression("StartDepth", None)
+        operation.StartDepth = self.HEIGHT - 1.0
+        self.document.recompute()
+        self.assertEqual([], self.cuttingMoves(operation),
+                         "the face is above the start depth, so none of it may be cut")
+
+        #and putting it back brings the path back
+        operation.StartDepth = self.HEIGHT + 1.0
+        self.document.recompute()
+        self.assertEqual(self.ROWS * (self.POINTS - 1), len(self.cuttingMoves(operation)))
+
     def test_a_tool_that_is_not_a_ball_nose_one_cuts_nothing(self):
         tool = self.toolController.Tool
         tool.ShapeType = "Endmill"

@@ -2,17 +2,19 @@
 
 A new operation in FreeCAD's CAM workbench: a zigzag over the parameter space of **one face**, cut
 with **any shape of tool**. It is the toolpath source for the five-axis postprocessor of
-[kin5ax](../kin5ax/), built in three stages:
+[kin5ax](../kin5ax/). How the tool is held is the `ToolAxis` property:
 
-| stage | the tool axis | state |
+| `ToolAxis` | the tool axis | writes |
 |---|---|---|
-| 1 | stands up, as in any three-axis operation | **done** |
-| 2 | along the surface normal | next |
-| 3 | leaning away from the normal by one angle, in a direction given by a second | after that |
+| `Vertical` | stands up, as in any three-axis operation | `G1 X.. Y.. Z..` |
+| `Normal` | along the surface normal, leaned over by `LeanAngle` towards `LeanRotation` | `G1 X.. Y.. Z.. I.. J.. K..` |
 
-Stages 2 and 3 add the axis to each move as `I`, `J` and `K` — the vector output convention — so
-`G1 X.. Y.. Z.. I.. J.. K..`. Stage 1 writes no `I J K`: no axis written means the tool stands up,
-which is unambiguous.
+`I J K` is the vector output convention: the axis of the tool as a unit vector in the coordinates of
+the part, which is what kin5ax solves for. A move without them is a move of a tool standing up, so
+a `Vertical` path is readable by anything that reads G-code — including FreeCAD's own simulator and
+postprocessors, **none of which know what to do with `I J K`**. They ignore the orientation and draw
+or post the tip positions alone, which is a three-axis reading of a five-axis path: right about where
+the tip goes, silent about how the tool got there. The postprocessor is the next thing to build.
 
 ## The point the path carries
 
@@ -39,6 +41,32 @@ rest of the tool: in a concave corner tighter than the tip radius the tool gouge
 bottom of an end mill digs into the uphill side of a slope. That is the usual limit of a
 point-by-point offset, and a drop-cutter test against the whole tool is what would fix it.
 
+## How the tool is held
+
+The contact point and the normal come out of the `u, v` sweep, and the two angles turn that normal
+into the axis of the tool. The angles are measured in the frame of the contact point: the direction
+the pass **travels** in (the chord between the neighbouring points of the pass, flattened into the
+tangent plane), the **side** of that travel (the normal crossed with it), and the **normal** itself.
+
+- `LeanAngle` is how far the axis leans away from the normal. Zero leaves it on the normal, which is
+  a ball nose tool cutting with the bottom of its ball — the worst-cutting point of it, which is why
+  a lean of a few degrees is usual.
+- `LeanRotation` is which way it leans, counted round the normal from the travel: **0°** leans the
+  tool along the way it travels, which is a lead angle; **90°** leans it to the side, which is a
+  tilt. Anything between mixes the two.
+
+Both are measured from the travel, so both **turn with the pass**: on a zigzag the lead angle leads
+in each pass rather than leading in one and trailing in the next, and the tilt changes sides with it.
+Turning the path round with a start point leans the tool again for the same reason.
+
+The lean has to be less than 90°, which would lay the tool in the surface.
+
+Leaning the tool moves its tip: the ball still has to touch the contact point, so the tip swings
+round the ball by the same angle. The operation allows for that in the start depth it suggests —
+the top of the face plus as far above it as the tip can get — because the depths hold the **tip**,
+and a start depth level with the face would put a leaning path entirely above it and leave nothing
+to cut. A start depth set by hand needs the same room.
+
 ## What the operation does
 
 Passes are laid across the face and points along each pass, both **counted in the parameter space of
@@ -58,6 +86,9 @@ to be at least two points, since one point cuts nothing.
 | `PathDirection` | `U` for passes at constant v, `V` for passes at constant u |
 | `ZigZag` | cut there and back, rather than returning through the air |
 | `InvertNormal` | put the tool on the other side of the face |
+| `ToolAxis` | `Vertical`, or `Normal` to lean the tool off the surface normal |
+| `LeanAngle` | how far it leans from the normal |
+| `LeanRotation` | which way it leans, round the normal from the direction of travel |
 
 The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths** with
 the step down, **Heights**, a **start point**, and the tool controller and the coolant on the page of
@@ -65,8 +96,8 @@ the operation itself.
 
 The depths mean what they say: the tip of the tool is kept between the final and the start depth, and
 a pass that leaves the range comes apart there, so the tool lifts over what it may not cut rather
-than dragging through it. The depths the operation suggests are the top and the bottom of the face,
-so by default nothing is held back.
+than dragging through it. The depths the operation suggests are the bottom of the face and the top of
+it plus room for the tip of a leaning tool, so by default nothing is held back.
 
 The **step down** cuts the depth in bands from the top down, none deeper than the step. Each point is
 cut once, in the band it falls into, rather than the whole path being repeated at every level: a
@@ -81,8 +112,13 @@ Not here: a finish depth. That is the depth of the last pass of a roughing seque
 operation follows the surface, so its last band is the finish already.
 
 The operation refuses, with a message in the report view rather than a silent wrong path: no tool,
-a ball nose tool of no diameter, no face, more than one face, and parameters that cannot make a
-path.
+a ball nose tool of no diameter, no face, more than one face, a lean of 90° or more, and parameters
+that cannot make a path.
+
+It also **warns** when the tool is not a ball nose one. The sphere at the end of the tool is all it
+knows of the shape — the sides and the flat of an end mill, the shank above the corner of a bull nose
+one, the cone of a V bit are nowhere in the arithmetic — so the path is right for a ball nose tool
+and an approximation for every other. The warning is in the report view, with the path.
 
 ## Installing it
 
@@ -201,12 +237,18 @@ The same script runs without a window, which is the quickest check that nothing 
    over it.
 6. Select the face to cut - one face, the top one.
 7. Run the command. The task panel asks for the passes, the points per pass, which parameter they
-   sweep, there and back, and which side of the face. Change a field and the path follows.
+   sweep, there and back, which side of the face, and how the tool is held. Change a field and the
+   path follows.
 8. **OK**, then look at the path in the 3D view and at **CAM -> Inspect G-code**.
 
 Things worth doing to it on purpose: pick two faces (the report view says it works on one); cut a
 hole through the box with a cylinder and work on the holed top face (the passes come apart at the
 hole instead of crossing it); set the points per pass to 1 (refused with a reason).
+
+And the angles, on the hemisphere, where they are easiest to see: set `ToolAxis` to `Normal` and the
+path becomes a dome of tool axes pointing out of the sphere. Give `LeanAngle` 15° and the whole lot
+leans into the travel; give `LeanRotation` 90° and it leans to the side instead. **CAM → Inspect
+G-code** shows the `I J K` on every cutting move.
 
 ### Two things about FreeCAD
 
@@ -232,13 +274,13 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-51 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+64 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
-operation and reads the commands that come out. Without FreeCAD those fifteen are skipped and the
-other thirty-six still run.
+operation and reads the commands that come out. Without FreeCAD those nineteen are skipped and the
+other forty-five still run.
 
 ## Where things are
 

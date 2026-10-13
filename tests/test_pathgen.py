@@ -1,4 +1,4 @@
-"""The zigzag and the tip of the tool, against surfaces whose answers are known on paper.
+"""The zigzag, the lean of the tool and its tip, against surfaces whose answers are known on paper.
 
 Nothing here imports FreeCAD: the generator asks a surface four things and these
 surfaces answer them, so the geometry is checked without a CAD kernel in the way.
@@ -173,6 +173,134 @@ class ThePointOfThePathIsTheTip(unittest.TestCase):
         self.assertAlmostEqual(0.0, passes[0][0].point[2], delta=1e-12)
 
 
+class Slope(Plane):
+    """A plane leaning 45 degrees about the y axis: z rises with u, and so does the normal."""
+
+    def valueAt(self, u, v):
+        return (u / math.sqrt(2.0), v, u / math.sqrt(2.0))
+
+    def normalAt(self, u, v):
+        return (-1.0 / math.sqrt(2.0), 0.0, 1.0 / math.sqrt(2.0))
+
+
+class TheLeanOfTheTool(unittest.TestCase):
+    """The two angles: how far the tool leans from the normal, and which way it leans.
+
+    A plane is enough for the arithmetic, its normal being the same everywhere
+    and the passes running along x: the frame the lean is measured in is then the
+    travel (1, 0, 0), the side of it (0, 1, 0) and the normal (0, 0, 1).
+    """
+
+    def leaning(self, **kwargs):
+        kwargs.setdefault("axis_mode", pathgen.AXIS_NORMAL)
+        kwargs.setdefault("rows", 2)
+        kwargs.setdefault("points_per_row", 3)
+        return pathgen.generate_passes(Plane(), parameters(**kwargs))
+
+    def assertDirection(self, expected, got, msg=None):
+        for i in range(3):
+            self.assertAlmostEqual(expected[i], got[i], delta=1e-12, msg=msg)
+
+    def test_without_a_lean_the_tool_points_along_the_normal(self):
+        """Which puts the tip on the contact point: the ball touches the surface under its middle."""
+        surface = Sphere(radius=10.0)
+        passes = pathgen.generate_passes(surface, parameters(axis_mode=pathgen.AXIS_NORMAL,
+                                                             rows=5, points_per_row=9))
+        self.assertEqual(5, len(passes))
+        for one in passes:
+            for location in one:
+                self.assertDirection(location.normal, location.axis)
+                self.assertDirection(location.surface_point, location.point)
+
+    def test_a_lean_of_no_rotation_leans_the_tool_the_way_it_travels(self):
+        """A lead angle. The first pass runs along +u, so the tool leans into +x."""
+        passes = self.leaning(lean_angle=30.0)
+        for location in passes[0]:
+            self.assertDirection((0.5, 0.0, math.sqrt(3.0) / 2.0), location.axis)
+
+    def test_the_lean_follows_the_way_the_pass_runs_rather_than_the_parameter(self):
+        """There and back: the second pass travels the other way, so the lead angle turns with it."""
+        passes = self.leaning(lean_angle=30.0, zigzag=True)
+        self.assertEqual([0.0, 50.0, 100.0], [l.u for l in passes[0]])
+        self.assertEqual([100.0, 50.0, 0.0], [l.u for l in passes[1]])
+        for location in passes[1]:
+            self.assertDirection((-0.5, 0.0, math.sqrt(3.0) / 2.0), location.axis)
+
+    def test_a_rotation_of_ninety_degrees_leans_the_tool_to_the_side(self):
+        """A tilt angle: round the normal from the travel, which puts it along +y here."""
+        passes = self.leaning(lean_angle=30.0, lean_rotation=90.0)
+        for location in passes[0]:
+            self.assertDirection((0.0, 0.5, math.sqrt(3.0) / 2.0), location.axis)
+
+    def test_the_rotation_goes_all_the_way_round(self):
+        for rotation, expected in ((0.0, (0.5, 0.0)),
+                                   (90.0, (0.0, 0.5)),
+                                   (180.0, (-0.5, 0.0)),
+                                   (270.0, (0.0, -0.5)),
+                                   (-90.0, (0.0, -0.5))):
+            location = self.leaning(lean_angle=30.0, lean_rotation=rotation)[0][0]
+            self.assertDirection((expected[0], expected[1], math.sqrt(3.0) / 2.0), location.axis,
+                                 msg="a rotation of %r" % rotation)
+
+    def test_the_lean_is_from_the_normal_and_not_from_the_vertical(self):
+        """On a face leaning 45 degrees, a lean of 45 along the travel stands the tool up."""
+        passes = pathgen.generate_passes(
+            Slope(), parameters(axis_mode=pathgen.AXIS_NORMAL, rows=1, points_per_row=3,
+                                lean_angle=45.0, tip_radius=3.0))
+        for location in passes[0]:
+            self.assertDirection(pathgen.VERTICAL_AXIS, location.axis,
+                                 msg="the normal leans 45 one way and the lean takes it back")
+
+    def test_the_ball_touches_the_contact_point_however_the_tool_leans(self):
+        """What the tip is worked out for, on a face that curves away in both parameters.
+
+        The ball of the tool is one radius from the contact point, in the
+        direction of the normal, whatever the axis of the tool does - that is the
+        whole of the arithmetic, and it is what a leaning tool must not break.
+        """
+        radius = 2.5
+        surface = Sphere(radius=10.0)
+        for lean, rotation in ((0.0, 0.0), (20.0, 35.0), (-15.0, 190.0), (60.0, 270.0)):
+            passes = pathgen.generate_passes(
+                surface, parameters(tip_radius=radius, rows=5, points_per_row=9,
+                                    axis_mode=pathgen.AXIS_NORMAL,
+                                    lean_angle=lean, lean_rotation=rotation))
+            for one in passes:
+                for location in one:
+                    self.assertAlmostEqual(1.0, length(location.axis), delta=1e-12,
+                                           msg="the axis of the tool is a unit vector")
+                    centre = ball_centre(location, radius)
+                    touch = [centre[i] - location.surface_point[i] for i in range(3)]
+                    self.assertAlmostEqual(radius, length(touch), delta=1e-12,
+                                           msg="a lean of %r towards %r" % (lean, rotation))
+                    for i in range(3):
+                        self.assertAlmostEqual(radius * location.normal[i], touch[i], delta=1e-12,
+                                               msg="a lean of %r towards %r" % (lean, rotation))
+
+    def test_a_tool_with_no_ball_stays_on_the_contact_point_whatever_it_does(self):
+        """A tip radius of zero has nothing to offset, so the lean moves the tool and not the tip."""
+        passes = self.leaning(tip_radius=0.0, lean_angle=30.0, lean_rotation=45.0)
+        for one in passes:
+            for location in one:
+                self.assertEqual(location.surface_point, location.point)
+
+    def test_turning_the_path_round_leans_the_tool_again(self):
+        """start_near reverses the travel, and a lead angle that stayed put would drag backwards."""
+        params = parameters(axis_mode=pathgen.AXIS_NORMAL, rows=2, points_per_row=3,
+                            lean_angle=30.0)
+        passes = pathgen.generate_passes(Plane(), params)
+        self.assertDirection((0.5, 0.0, math.sqrt(3.0) / 2.0), passes[0][0].axis)
+
+        #the path ends at the far end of the last pass; starting there turns the whole of it round
+        turned = pathgen.start_near(passes, passes[-1][-1].point, params)
+        self.assertEqual((0.0, 50.0), (turned[0][0].u, turned[0][0].v))
+        for one in turned:
+            for index, location in enumerate(one[:-1]):
+                travelling = one[index + 1].surface_point[0] - location.surface_point[0]
+                self.assertGreater(location.axis[0] * travelling, 0.0,
+                                   "the tool leans the way it travels")
+
+
 class TheZigZag(unittest.TestCase):
 
     def test_the_passes_lie_across_the_face_and_the_points_along_it(self):
@@ -240,6 +368,9 @@ class ParametersThatCannotMakeAPath(unittest.TestCase):
     def test_they_are_refused_with_a_reason(self):
         surface = Plane()
         for kwargs, word in (({"tip_radius": -1.0}, "radius"),
+                             ({"axis_mode": "SIDEWAYS"}, "axis of the tool"),
+                             ({"axis_mode": pathgen.AXIS_NORMAL, "lean_angle": 90.0}, "lean"),
+                             ({"axis_mode": pathgen.AXIS_NORMAL, "lean_angle": -120.0}, "lean"),
                              ({"rows": 0}, "pass"),
                              ({"points_per_row": 1}, "two points"),
                              ({"direction": "W"}, "direction")):
@@ -356,13 +487,13 @@ class TheStartPoint(unittest.TestCase):
     def test_a_point_by_the_beginning_leaves_the_path_as_it_is(self):
         passes = self.passes()
         self.assertEqual([l.u for l in passes[0]],
-                         [l.u for l in pathgen.start_near(passes, (0.0, 0.0, 0.0))[0]])
+                         [l.u for l in pathgen.start_near(passes, (0.0, 0.0, 0.0), parameters())[0]])
 
     def test_a_point_by_the_other_end_turns_the_path_round(self):
         passes = self.passes()
         #the path ends at the far corner of the last pass; a start point there begins it from there
         last = passes[-1][-1].point
-        turned = pathgen.start_near(passes, last)
+        turned = pathgen.start_near(passes, last, parameters())
         self.assertEqual(last, turned[0][0].point)
         #and the whole of it is still there, pass for pass and point for point
         self.assertEqual(sorted((l.u, l.v) for one in passes for l in one),
@@ -370,7 +501,7 @@ class TheStartPoint(unittest.TestCase):
         self.assertEqual([len(one) for one in passes], [len(one) for one in turned])
 
     def test_nothing_to_arrange_is_not_an_error(self):
-        self.assertEqual([], pathgen.start_near([], (0.0, 0.0, 0.0)))
+        self.assertEqual([], pathgen.start_near([], (0.0, 0.0, 0.0), parameters()))
 
 
 if __name__ == "__main__":

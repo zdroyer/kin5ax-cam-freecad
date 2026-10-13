@@ -290,6 +290,82 @@ class TheOperation(unittest.TestCase):
         operation = self.createOperation()
         self.assertAlmostEqual(1.5, operation.Proxy.tipRadius(operation), delta=1e-12)
 
+    def test_the_tool_stands_up_until_asked_otherwise(self):
+        """A three-axis path, and no orientation in it: nothing says I, J or K."""
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        self.assertEqual("Vertical", operation.ToolAxis)
+        for command in operation.Path.Commands:
+            for name in ("I", "J", "K"):
+                self.assertNotIn(name, command.Parameters,
+                                 "a vertical tool needs nothing said about its axis")
+
+    def test_the_axis_along_the_normal_is_written_into_every_cutting_move(self):
+        """On the level top of the box the normal stands up, so the axis is 0, 0, 1."""
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        operation.ToolAxis = "Normal"
+        self.document.recompute()
+        moves = self.cuttingMoves(operation)
+        self.assertEqual(self.ROWS * (self.POINTS - 1), len(moves))
+        for move in moves:
+            self.assertAlmostEqual(0.0, move.Parameters["I"], delta=1e-9)
+            self.assertAlmostEqual(0.0, move.Parameters["J"], delta=1e-9)
+            self.assertAlmostEqual(1.0, move.Parameters["K"], delta=1e-9)
+            #the tool points along the normal, so its tip is on the face itself
+            self.assertAlmostEqual(self.HEIGHT, move.Parameters["Z"], delta=1e-9)
+
+    def test_the_two_angles_lean_the_tool_and_move_its_tip(self):
+        """A lead angle of 30 on the level top of the box, where the arithmetic is on paper.
+
+        The normal stands up and a pass runs along x, so a lean of 30 towards the
+        travel puts the axis at (sin 30, 0, cos 30). The ball still touches the
+        face, so the tip rises by r - r cos 30 and moves back by r sin 30.
+        """
+        import math
+
+        radius = 0.5 * self.DIAMETER
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        operation.ToolAxis = "Normal"
+        operation.LeanAngle = 30.0
+        self.document.recompute()
+
+        moves = self.cuttingMoves(operation)
+        self.assertEqual(self.ROWS * (self.POINTS - 1), len(moves))
+        for move in moves:
+            self.assertAlmostEqual(0.0, move.Parameters["J"], delta=1e-9)
+            self.assertAlmostEqual(math.cos(math.radians(30.0)), move.Parameters["K"], delta=1e-9)
+            self.assertAlmostEqual(0.5, abs(move.Parameters["I"]), delta=1e-9)
+            self.assertAlmostEqual(self.HEIGHT + radius * (1.0 - math.cos(math.radians(30.0))),
+                                   move.Parameters["Z"], delta=1e-9)
+
+        #there and back: the lead angle leans with the travel, so it turns over with the pass
+        first = [m.Parameters["I"] for m in moves[: self.POINTS - 1]]
+        second = [m.Parameters["I"] for m in moves[self.POINTS - 1: 2 * (self.POINTS - 1)]]
+        self.assertTrue(all(i > 0.0 for i in first), "the first pass runs one way")
+        self.assertTrue(all(i < 0.0 for i in second), "and the second runs the other")
+
+        #and the tilt: round the normal from the travel, which is the y direction here. It is
+        #measured from the travel like the lead angle, so it changes sides with the pass as well.
+        operation.LeanRotation = 90.0
+        self.document.recompute()
+        tilted = self.cuttingMoves(operation)
+        for move in tilted:
+            self.assertAlmostEqual(0.0, move.Parameters["I"], delta=1e-9)
+            self.assertAlmostEqual(0.5, abs(move.Parameters["J"]), delta=1e-9)
+        self.assertTrue(all(m.Parameters["J"] > 0.0 for m in tilted[: self.POINTS - 1]))
+        self.assertTrue(all(m.Parameters["J"] < 0.0
+                            for m in tilted[self.POINTS - 1: 2 * (self.POINTS - 1)]))
+
+    def test_a_lean_that_lays_the_tool_in_the_surface_is_refused(self):
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        operation.ToolAxis = "Normal"
+        operation.LeanAngle = 90.0
+        self.document.recompute()
+        self.assertEqual([], self.cuttingMoves(operation))
+
     def test_a_ball_nose_tool_of_no_width_has_no_ball(self):
         tool = self.toolController.Tool
         tool.ShapeType = "Ballend"

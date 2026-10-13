@@ -4,8 +4,9 @@
   <description>
     A 3D Surface (5axis) operation for the CAM workbench: a zigzag over the parameter space of one
     face, cut with any shape of tool. The path carries the tip of the tool, worked out from the
-    roundness at the end of it. The orientation of the tool, and with it the five-axis output that
-    feeds the kin5ax postprocessor, follows in the next versions.
+    roundness at the end of it. The tool stands up, or points along the surface normal leaned over
+    by two angles, and then every cutting move carries the axis of the tool as I, J and K - the
+    vector output the kin5ax postprocessor solves for.
   </description>
   <version>0.1.0</version>
   <date>2026-10-12</date>

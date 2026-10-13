@@ -1,6 +1,6 @@
 """The task panel page of the 3D Surface (5axis) operation, and the command that creates one.
 
-The form is built in code rather than loaded from a .ui file: there are five
+The form is built in code rather than loaded from a .ui file: there are eight
 fields, and a file of Qt XML to keep in step with them would be the larger half
 of this module.
 
@@ -30,6 +30,11 @@ from kin5axcam import surface5axis
 
 translate = FreeCAD.Qt.translate
 QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
+
+
+def degrees(value):
+    """An angle property as a plain number of degrees, which is how the spin boxes count."""
+    return float(getattr(value, "Value", value))
 
 #the icon of the command: a toolpath on the aerofoil of a turbine blade, drawn in the colours the
 #operations of the CAM workbench use
@@ -107,7 +112,45 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             "when that is the wrong side"))
         layout.addRow("", self.invertNormal)
 
+        self.toolAxis = QtGui.QComboBox(form)
+        self.toolAxis.addItems([translate("Surface5Axis", "Vertical"),
+                                translate("Surface5Axis", "Normal")])
+        self.toolAxis.setToolTip(translate(
+            "Surface5Axis", "How the tool is held. Vertical stands it up, which is a three-axis "
+            "path any postprocessor reads. Normal points it along the surface normal, leaned over "
+            "by the two angles below, and writes the axis into every cutting move as I, J and K."))
+        layout.addRow(translate("Surface5Axis", "Tool axis"), self.toolAxis)
+
+        self.leanAngle = QtGui.QDoubleSpinBox(form)
+        self.leanAngle.setRange(-89.0, 89.0)
+        self.leanAngle.setDecimals(3)
+        self.leanAngle.setSuffix(" °")
+        self.leanAngle.setToolTip(translate(
+            "Surface5Axis", "How far the tool leans away from the surface normal. Zero holds it "
+            "along the normal, which is the whole of the lean for a ball nose tool cutting with "
+            "the bottom of its ball."))
+        layout.addRow(translate("Surface5Axis", "Lean from the normal"), self.leanAngle)
+
+        self.leanRotation = QtGui.QDoubleSpinBox(form)
+        self.leanRotation.setRange(-360.0, 360.0)
+        self.leanRotation.setDecimals(3)
+        self.leanRotation.setSuffix(" °")
+        self.leanRotation.setToolTip(translate(
+            "Surface5Axis", "Which way it leans, measured round the normal from the direction the "
+            "pass runs in: zero leans the tool along the travel (a lead angle), 90 degrees leans "
+            "it to the side of the travel (a tilt)."))
+        layout.addRow(translate("Surface5Axis", "Lean towards"), self.leanRotation)
+
+        #the angles are only read while the axis follows the normal, and look it while it does not
+        self.toolAxis.currentIndexChanged.connect(self.showWhetherTheAnglesAreRead)
+        self.showWhetherTheAnglesAreRead()
+
         return form
+
+    def showWhetherTheAnglesAreRead(self):
+        leaning = self.toolAxis.currentIndex() > 0
+        self.leanAngle.setEnabled(leaning)
+        self.leanRotation.setEnabled(leaning)
 
     def getTitle(self, obj):
         return translate("Surface5Axis", "3D Surface (5axis)")
@@ -127,6 +170,13 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             obj.ZigZag = self.zigZag.isChecked()
         if obj.InvertNormal != self.invertNormal.isChecked():
             obj.InvertNormal = self.invertNormal.isChecked()
+        axis = str(self.toolAxis.currentText())
+        if obj.ToolAxis != axis:
+            obj.ToolAxis = axis
+        if degrees(obj.LeanAngle) != self.leanAngle.value():
+            obj.LeanAngle = self.leanAngle.value()
+        if degrees(obj.LeanRotation) != self.leanRotation.value():
+            obj.LeanRotation = self.leanRotation.value()
 
     def setFields(self, obj):
         """The operation into the form."""
@@ -139,6 +189,12 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             self.pathDirection.setCurrentIndex(index)
         self.zigZag.setChecked(obj.ZigZag)
         self.invertNormal.setChecked(obj.InvertNormal)
+        index = self.toolAxis.findText(obj.ToolAxis, QtCore.Qt.MatchFixedString)
+        if index >= 0:
+            self.toolAxis.setCurrentIndex(index)
+        self.leanAngle.setValue(degrees(obj.LeanAngle))
+        self.leanRotation.setValue(degrees(obj.LeanRotation))
+        self.showWhetherTheAnglesAreRead()
 
     def getSignalsForUpdate(self, obj):
         #not the tool controller: the base class connects that one itself, by the name of the widget
@@ -149,6 +205,9 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             self.pathDirection.currentIndexChanged,
             self.zigZag.stateChanged,
             self.invertNormal.stateChanged,
+            self.toolAxis.currentIndexChanged,
+            self.leanAngle.valueChanged,
+            self.leanRotation.valueChanged,
         ]
 
 

@@ -3,17 +3,26 @@
 This is the FreeCAD side of it - the properties, the face, the tool and the
 commands. The geometry is in pathgen.py, which knows nothing about FreeCAD.
 
-Stage one, which is what this is: the tool stands up, as in any three-axis
-operation, and the commands carry the tip of the tool, which is what a control
-programs. The orientation of the tool and the two angles that lean it come in the
-stages after this one, and will ride in the commands as I, J and K.
+How the tool is held is the ToolAxis property. Vertical is the three-axis
+reading of the operation: the tool stands up and the commands say nothing about
+its orientation, which is unambiguous. Normal leans the tool over from the
+surface normal by LeanAngle, in a direction LeanRotation measured round the
+normal from the way the tool travels, and every cutting move then carries the
+axis as I, J and K alongside X, Y and Z - the vector output convention, and what
+the kin5ax postprocessor solves for.
 
-Any tool cuts here. What the shape of the tool decides is the radius of the
-sphere at its end, which is how far along the normal the surface point moves
-before the tip is taken one radius back down the axis - see pathgen.py. A ball
-nose tool follows a curved surface the closest, as it has the most roundness to
-offset; an end mill has none, so its tip lands on the surface point itself.
+The commands carry the tip of the tool, which is what a control programs. Where
+the tip goes follows from the contact point, the normal there and the axis, and
+that is pathgen.py.
+
+Any tool cuts here, but only the sphere at the end of it is taken into account -
+half the diameter of a ball nose tool, the corner radius of a bull nose one,
+nothing at all of the sides or the flat of an end mill. The path is therefore
+right for a ball nose tool and an approximation for every other, which the
+operation says in the report view rather than leaving it to be discovered.
 """
+
+import math
 
 import FreeCAD
 import Path
@@ -35,6 +44,9 @@ PROPERTY_GROUP = "Surface5Axis"
 #the shapes of tool whose end is a half sphere of the full diameter: the plain ball nose one and the
 #tapered one, whose taper is above the ball and does not change it
 BALL_NOSED_SHAPES = ("ballend", "ballnose", "taperedballnose")
+
+#what the ToolAxis property may say, and the way pathgen knows each of them by
+TOOL_AXIS_MODES = (("Vertical", pathgen.AXIS_VERTICAL), ("Normal", pathgen.AXIS_NORMAL))
 
 
 def tool_shape_name(tool):
@@ -119,6 +131,26 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
                 translate("Surface5Axis", "Cut there and back, each pass running against the one "
                           "before it. Switched off, every pass runs the same way and the tool "
                           "returns through the air."))
+        if not hasattr(obj, "ToolAxis"):
+            obj.addProperty(
+                "App::PropertyEnumeration", "ToolAxis", PROPERTY_GROUP,
+                translate("Surface5Axis", "How the tool is held. Vertical stands it up, which is "
+                          "the three-axis reading of this operation. Normal points it along the "
+                          "surface normal, leaned over by the two angles, and writes the axis into "
+                          "every cutting move as I, J and K."))
+        if not hasattr(obj, "LeanAngle"):
+            obj.addProperty(
+                "App::PropertyAngle", "LeanAngle", PROPERTY_GROUP,
+                translate("Surface5Axis", "How far the axis of the tool leans away from the "
+                          "surface normal. Zero holds it along the normal. Only read while the "
+                          "tool axis is Normal."))
+        if not hasattr(obj, "LeanRotation"):
+            obj.addProperty(
+                "App::PropertyAngle", "LeanRotation", PROPERTY_GROUP,
+                translate("Surface5Axis", "Which way the tool leans, measured round the surface "
+                          "normal from the direction the pass runs in. Zero leans it along the "
+                          "travel, which is a lead angle; 90 degrees leans it to the side of the "
+                          "travel, which is a tilt."))
         if not hasattr(obj, "InvertNormal"):
             obj.addProperty(
                 "App::PropertyBool", "InvertNormal", PROPERTY_GROUP,
@@ -131,6 +163,10 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         obj.PathDirection = ["U", "V"]
         if chosen:
             obj.PathDirection = chosen
+        chosen = obj.ToolAxis if hasattr(obj, "ToolAxis") else None
+        obj.ToolAxis = [name for name, mode in TOOL_AXIS_MODES]
+        if chosen:
+            obj.ToolAxis = chosen
 
     def opSetDefaultValues(self, obj, job):
         """Something sensible to start from: twenty passes of sixty points, there and back."""
@@ -139,6 +175,9 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         obj.PathDirection = "U"
         obj.ZigZag = True
         obj.InvertNormal = False
+        obj.ToolAxis = "Vertical"
+        obj.LeanAngle = 0.0
+        obj.LeanRotation = 0.0
 
     def opRejectAddBase(self, obj, base, sub):
         """Only a face of the model, and only one of them."""
@@ -147,17 +186,39 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         return base not in self.model
 
     def opUpdateDepths(self, obj):
-        """What the depths should be, left to the user to change: the top and bottom of the face.
+        """What the depths should be, left to the user to change: the face, and room for the tool.
 
-        A start depth above the face and a final depth below it would have the
-        operation cut nothing it would not cut anyway, so the face itself is the
-        honest suggestion.
+        The bottom of the face is the final depth: a final depth below it would
+        have the operation cut nothing it would not cut anyway. The start depth
+        is the top of the face plus however far above the face the tip of the
+        tool can be, since the depths hold the tip and a leaning tool lifts its
+        tip off the surface - without that room a lean of any size would put the
+        whole path above the start depth and leave nothing to cut.
         """
         face = self.theFace(obj, quiet=True)
         if face is None:
             return
-        obj.OpStartDepth = face.BoundBox.ZMax
+        obj.OpStartDepth = face.BoundBox.ZMax + self.tipClearance(obj)
         obj.OpFinalDepth = face.BoundBox.ZMin
+
+    def tipClearance(self, obj):
+        """How far above the surface the tip of the tool can get, for the start depth to allow.
+
+        The tip is the contact point plus the tip radius times (normal - axis),
+        so its height above the surface is that radius times the difference of
+        the two heights. A tool standing up can only be level with the contact
+        point or below it, the axis standing no further from the vertical than
+        the normal does, which is nothing to allow for. Leaning it by an angle
+        makes the worst case the radius times (1 - cos lean + sin lean), which
+        is what a normal and an axis that far apart can do to the height.
+        """
+        if self.axisMode(obj) == pathgen.AXIS_VERTICAL:
+            return 0.0
+        radius = self.tipRadius(obj, quiet=True)
+        if not radius:
+            return 0.0
+        lean = math.radians(quantity_value(getattr(obj, "LeanAngle", 0.0)))
+        return radius * (1.0 - math.cos(lean) + abs(math.sin(lean)))
 
     def theFace(self, obj, quiet=False):
         """The one face this operation works on, or None with a message saying why there is none.
@@ -197,7 +258,7 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             return None
         return shape
 
-    def tipRadius(self, obj):
+    def tipRadius(self, obj, quiet=False):
         """The radius of the sphere at the end of the tool, or None when there is no tool to ask.
 
         A bull nose tool, and any other the library builds from a shape with a
@@ -206,24 +267,46 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         an end mill, a V bit, a drill, a tool whose shape does not say what it is
         - has nothing rounded to offset, and a radius of zero puts the tip of it
         on the surface.
+
+        That sphere is all this operation knows of the tool, so anything but a
+        ball nose one gets a warning with the path: the sides and the flat of an
+        end mill, and the shank above the corner of a bull nose one, are not
+        taken into account anywhere.
         """
         tool = self.tool
         if tool is None:
-            Path.Log.error(
-                translate("Surface5Axis", "%s has no tool: pick a tool controller") % obj.Label)
+            if not quiet:
+                Path.Log.error(
+                    translate("Surface5Axis", "%s has no tool: pick a tool controller") % obj.Label)
             return None
+        shape = tool_shape_name(tool)
+        if shape not in BALL_NOSED_SHAPES and not quiet:
+            Path.Log.warning(
+                translate("Surface5Axis", "%s works out its path for the ball of a ball nose tool, "
+                          "and the tool of this operation is %s. Only the sphere at the end of it "
+                          "is taken into account, so the path is an approximation: check it before "
+                          "cutting.") % (obj.Label, shape if shape else "of an unknown shape"))
         corner = quantity_value(getattr(tool, "CornerRadius", 0.0))
         if corner > 0.0:
             return corner
-        if tool_shape_name(tool) in BALL_NOSED_SHAPES:
+        if shape in BALL_NOSED_SHAPES:
             diameter = quantity_value(getattr(tool, "Diameter", 0.0))
             if diameter <= 0.0:
-                Path.Log.error(
-                    translate("Surface5Axis", "the ball nose tool of %s has no diameter, so the "
-                              "ball it cuts with has no size") % obj.Label)
+                if not quiet:
+                    Path.Log.error(
+                        translate("Surface5Axis", "the ball nose tool of %s has no diameter, so "
+                                  "the ball it cuts with has no size") % obj.Label)
                 return None
             return 0.5 * diameter
         return 0.0
+
+    def axisMode(self, obj):
+        """What pathgen calls the ToolAxis of the operation, standing the tool up if it says nothing."""
+        chosen = getattr(obj, "ToolAxis", None)
+        for name, mode in TOOL_AXIS_MODES:
+            if chosen == name:
+                return mode
+        return pathgen.AXIS_VERTICAL
 
     def opExecute(self, obj):
         """The passes of the zigzag, as commands."""
@@ -241,6 +324,9 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             direction=obj.PathDirection,
             zigzag=obj.ZigZag,
             flip_normal=obj.InvertNormal,
+            axis_mode=self.axisMode(obj),
+            lean_angle=quantity_value(getattr(obj, "LeanAngle", 0.0)),
+            lean_rotation=quantity_value(getattr(obj, "LeanRotation", 0.0)),
         )
         try:
             passes = pathgen.generate_passes(face, parameters)
@@ -252,13 +338,26 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
                                    quantity_value(obj.StartDepth))
         if getattr(obj, "UseStartPoint", False):
             start = obj.StartPoint
-            passes = pathgen.start_near(passes, (start.x, start.y, start.z))
+            passes = pathgen.start_near(passes, (start.x, start.y, start.z), parameters)
         if not passes:
             Path.Log.warning(
                 translate("Surface5Axis", "%s found nothing to cut on that face between the final "
                           "depth and the start depth") % obj.Label)
             return
         self.appendPasses(obj, passes)
+
+    def orientation(self, obj, location):
+        """The axis of the tool as the parameters of a move, which is nothing at all when it stands up.
+
+        I, J and K are the vector output convention: the axis of the tool as a
+        unit vector in the coordinates of the part, which is what the kin5ax
+        postprocessor takes. A move without them is a move of a tool standing
+        up, so the three-axis path stays the three-axis path it was, readable by
+        anything that reads G-code.
+        """
+        if self.axisMode(obj) == pathgen.AXIS_VERTICAL:
+            return {}
+        return {"I": location.axis[0], "J": location.axis[1], "K": location.axis[2]}
 
     def appendPasses(self, obj, passes):
         """A pass becomes: up to the clearance height, across, down, cut, up again."""
@@ -270,11 +369,14 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
             self.commandlist.append(
                 Path.Command("G0", {"X": first[0], "Y": first[1], "F": self.horizRapid}))
             self.commandlist.append(Path.Command("G0", {"Z": safe, "F": self.vertRapid}))
-            self.commandlist.append(Path.Command("G1", {"Z": first[2], "F": self.vertFeed}))
+            plunge = {"Z": first[2], "F": self.vertFeed}
+            plunge.update(self.orientation(obj, one[0]))
+            self.commandlist.append(Path.Command("G1", plunge))
             for location in one[1:]:
                 point = location.point
-                self.commandlist.append(Path.Command(
-                    "G1", {"X": point[0], "Y": point[1], "Z": point[2], "F": self.horizFeed}))
+                move = {"X": point[0], "Y": point[1], "Z": point[2], "F": self.horizFeed}
+                move.update(self.orientation(obj, location))
+                self.commandlist.append(Path.Command("G1", move))
             #Up to clearance after every pass, the last one included: the base class of the
             #operation happens to append a retract of its own as well, and a duplicate rapid to a
             #height the tool is already at costs one line of G-code. An operation that leaves the
@@ -284,7 +386,8 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
 
 def SetupProperties():
     """The properties the setup sheet of a job may carry defaults for."""
-    return ["Rows", "PointsPerRow", "PathDirection", "ZigZag", "InvertNormal"]
+    return ["Rows", "PointsPerRow", "PathDirection", "ZigZag", "InvertNormal",
+            "ToolAxis", "LeanAngle", "LeanRotation"]
 
 
 def Create(name, obj=None, parentJob=None):

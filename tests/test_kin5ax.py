@@ -274,5 +274,82 @@ class AMachine(unittest.TestCase):
         self.assertEqual("B", axes.angle1_letter)
 
 
+
+@needs_library
+@needs_chain
+class TheCutting(unittest.TestCase):
+    """A path across the top of a block, cut by the ball of the tool: the groove is where it went."""
+
+    def setUp(self):
+        self.chain = kin5ax.Chain(CHAIN)
+        self.tool = a_tool()
+
+    def tearDown(self):
+        self.tool.close()
+        self.chain.close()
+
+    def test_a_block_is_whole_to_begin_with_and_its_surface_is_its_outside(self):
+        with kin5ax.Material((0.1, 0.1, 0.05), 0.005, (-0.05, -0.05, 0.0)) as block:
+            nx, ny, nz = block.dimensions()
+            self.assertGreaterEqual(nx, 20)
+            total, removed = block.volumes()
+            self.assertGreater(total, 0.0)
+            self.assertEqual(0.0, removed)
+            surface = block.surface()
+            self.assertGreater(len(surface), 0)
+            self.assertLess(len(surface) // 3, nx * ny * nz, "the inside is not surface")
+            self.assertEqual(0, len(surface) % 3)
+
+    def test_a_block_that_cannot_be_made_is_refused(self):
+        with self.assertRaises(kin5ax.Kin5axError):
+            kin5ax.Material((0.0, 0.1, 0.05), 0.005, (0.0, 0.0, 0.0))
+        with self.assertRaises(kin5ax.Kin5axError):
+            kin5ax.Material((1.0, 1.0, 1.0), 1e-6, (0.0, 0.0, 0.0))
+
+    def test_the_ball_cuts_a_groove_under_the_path_and_nowhere_else(self):
+        radius = 0.016
+        settings = kin5ax.Settings.default()
+        settings.check_collisions = 0           #the block is not in the chain's model of itself
+        #the ball centre on the top face of the block, so that the ball dips a radius into it
+        positions = [(-0.04 + 0.02 * i, 0.0, 0.0) for i in range(5)]
+        axes = [(0.0, 0.0, 1.0)] * 5
+        path = self.chain.postprocess_locations(positions, axes, settings, self.tool)
+        self.assertEqual(path.count_of_status(kin5ax.SOLVED), path.size(), path.report())
+        block = kin5ax.Material((0.12, 0.06, 0.03), 0.002, (-0.06, -0.03, -0.03))
+        with kin5ax.Simulation(self.chain, self.tool, path, block) as cutting:
+            index, count, finished = cutting.progress()
+            self.assertEqual((0, path.size(), False), (index, count, finished))
+            self.assertTrue(cutting.step())
+            total, after_one = block.volumes()
+            self.assertGreater(after_one, 0.0, "the ball took a bite")
+            cutting.run()
+            self.assertEqual((count, count, True), cutting.progress())
+            total, removed = block.volumes()
+            self.assertGreater(removed, after_one)
+            self.assertLess(removed, total)
+            #the top of what is left: under the path the floor of the groove, beside it the block
+            surface = block.surface()
+            under, beside = -1.0, -1.0
+            for i in range(len(surface) // 3):
+                x, y, z = surface[3 * i], surface[3 * i + 1], surface[3 * i + 2]
+                if abs(x) > 0.03:
+                    continue
+                if abs(y) < 0.001:
+                    under = max(under, z)
+                if abs(y - 0.025) < 0.0015:
+                    beside = max(beside, z)
+            self.assertLess(under, -0.5 * radius, "a groove under the path")
+            self.assertGreater(under, -radius - 0.004, "no deeper than the ball reaches, to a voxel")
+            self.assertGreater(beside, -0.004, "and nothing taken off beside it")
+            self.assertEqual(0, cutting.gouges()[0], "the shank stayed above the block")
+            self.assertFalse(cutting.step(), "nothing past the end")
+            cutting.reset()
+            self.assertEqual(0, cutting.progress()[0])
+        block.reset()
+        self.assertEqual(0.0, block.volumes()[1], "whole again")
+        block.close()
+        path.close()
+
+
 if __name__ == "__main__":
     unittest.main()

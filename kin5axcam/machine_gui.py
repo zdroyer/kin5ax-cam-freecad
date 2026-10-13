@@ -264,7 +264,7 @@ class Player(object):
         self.slider.setValue(self.slider.value() + 1)
 
     def getStandardButtons(self):
-        return int(QtGui.QDialogButtonBox.Close)
+        return QtGui.QDialogButtonBox.Close
 
     def reject(self):
         self.pause()

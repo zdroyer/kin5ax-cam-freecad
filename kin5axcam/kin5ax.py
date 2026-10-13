@@ -223,6 +223,8 @@ class GcodeAxes(ctypes.Structure):
 _chain_t = ctypes.c_void_p
 _tool_t = ctypes.c_void_p
 _path_t = ctypes.c_void_p
+_material_t = ctypes.c_void_p
+_simulation_t = ctypes.c_void_p
 _double_p = ctypes.POINTER(ctypes.c_double)
 _size_p = ctypes.POINTER(ctypes.c_size_t)
 _int_p = ctypes.POINTER(ctypes.c_int)
@@ -366,6 +368,33 @@ def _declare(lib):
     lib.k5_path_errors.argtypes = [_path_t, _double_p, _double_p]
     lib.k5_path_last_configuration.restype = ctypes.c_int
     lib.k5_path_last_configuration.argtypes = [_path_t, _double_p]
+    lib.k5_material_create.restype = ctypes.c_int
+    lib.k5_material_create.argtypes = [ctypes.c_double] * 7 + [ctypes.POINTER(_material_t)]
+    lib.k5_material_free.restype = None
+    lib.k5_material_free.argtypes = [_material_t]
+    lib.k5_material_reset.restype = ctypes.c_int
+    lib.k5_material_reset.argtypes = [_material_t]
+    lib.k5_material_dimensions.restype = ctypes.c_int
+    lib.k5_material_dimensions.argtypes = [_material_t, _size_p, _size_p, _size_p]
+    lib.k5_material_volumes.restype = ctypes.c_int
+    lib.k5_material_volumes.argtypes = [_material_t, _double_p, _double_p]
+    lib.k5_material_surface.restype = ctypes.c_int
+    lib.k5_material_surface.argtypes = [_material_t, _double_p, ctypes.c_size_t, _size_p]
+    lib.k5_simulation_create.restype = ctypes.c_int
+    lib.k5_simulation_create.argtypes = [_chain_t, _tool_t, _path_t, _material_t,
+                                         ctypes.POINTER(_simulation_t)]
+    lib.k5_simulation_free.restype = None
+    lib.k5_simulation_free.argtypes = [_simulation_t]
+    lib.k5_simulation_reset.restype = ctypes.c_int
+    lib.k5_simulation_reset.argtypes = [_simulation_t]
+    lib.k5_simulation_step.restype = ctypes.c_int
+    lib.k5_simulation_step.argtypes = [_simulation_t, _int_p]
+    lib.k5_simulation_run.restype = ctypes.c_int
+    lib.k5_simulation_run.argtypes = [_simulation_t]
+    lib.k5_simulation_progress.restype = ctypes.c_int
+    lib.k5_simulation_progress.argtypes = [_simulation_t, _size_p, _size_p, _int_p]
+    lib.k5_simulation_gouges.restype = ctypes.c_int
+    lib.k5_simulation_gouges.argtypes = [_simulation_t, _size_p, _size_p, _double_p]
     lib.k5_chain_default_gcode_axes.restype = ctypes.c_int
     lib.k5_chain_default_gcode_axes.argtypes = [_chain_t, ctypes.POINTER(GcodeAxes)]
     lib.k5_path_write_gcode.restype = ctypes.c_int
@@ -699,6 +728,151 @@ class Chain(object):
         if self._handle:
             self._lib.k5_chain_free(self._handle)
             self._handle = _chain_t()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- the cutting simulation
+
+class Material(object):
+    """A box of material in the frame of the material of the chain, all lengths in the unit of the file.
+
+    size and start are 3-sequences; voxel is the side of one voxel. Everything
+    is material to begin with. Rudimentary by design: the tool is stamped into
+    it once per location with nothing swept between two, so the interpolation
+    of the path has to be as dense as the voxels for a cut to look like one.
+    """
+
+    def __init__(self, size, voxel, start, library=None):
+        self._lib = load(library)
+        self._handle = _material_t()
+        size = _doubles(size, 3, "size")
+        start = _doubles(start, 3, "start")
+        self.size = tuple(size)
+        self.voxel = float(voxel)
+        self.start = tuple(start)
+        _check(self._lib, self._lib.k5_material_create(
+            size[0], size[1], size[2], float(voxel), start[0], start[1], start[2],
+            ctypes.byref(self._handle)), "k5_material_create")
+
+    @property
+    def handle(self):
+        return self._handle
+
+    def reset(self):
+        """Whole again."""
+        _check(self._lib, self._lib.k5_material_reset(self._handle), "k5_material_reset")
+
+    def dimensions(self):
+        """How many voxels along X, Y and Z."""
+        nx, ny, nz = ctypes.c_size_t(), ctypes.c_size_t(), ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_material_dimensions(self._handle, ctypes.byref(nx), ctypes.byref(ny),
+                                                           ctypes.byref(nz)), "k5_material_dimensions")
+        return nx.value, ny.value, nz.value
+
+    def volumes(self):
+        """The volume of the block and the volume removed so far, in the unit of the file cubed."""
+        total, removed = ctypes.c_double(), ctypes.c_double()
+        _check(self._lib, self._lib.k5_material_volumes(self._handle, ctypes.byref(total),
+                                                        ctypes.byref(removed)), "k5_material_volumes")
+        return total.value, removed.value
+
+    def surface(self):
+        """The voxels of the surface of what is left, as a flat ctypes array of 3 doubles each.
+
+        The corner of each voxel nearest the start of the block; the count is
+        len(array) // 3. A flat array rather than tuples because a surface is a
+        hundred thousand voxels and the host draws them, not reads them.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_material_surface(self._handle, None, 0, ctypes.byref(count)),
+               "k5_material_surface")
+        if not count.value:
+            return (ctypes.c_double * 0)()
+        out = (ctypes.c_double * (3 * count.value))()
+        _check(self._lib, self._lib.k5_material_surface(self._handle, out, 3 * count.value,
+                                                        ctypes.byref(count)), "k5_material_surface")
+        return out
+
+    def close(self):
+        if self._handle:
+            self._lib.k5_material_free(self._handle)
+            self._handle = _material_t()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+class Simulation(object):
+    """The path cutting the material with the tool on the chain, one location at a time.
+
+    The four are kept here for as long as the simulation lives, since the
+    library expects the caller to keep them alive; the chain's joint values and
+    the tool's position are changed by every step.
+    """
+
+    def __init__(self, chain, tool, path, material, library=None):
+        self._lib = load(library)
+        self._handle = _simulation_t()
+        self.chain, self.tool, self.path, self.material = chain, tool, path, material
+        _check(self._lib, self._lib.k5_simulation_create(
+            chain.handle, tool.handle, path._handle, material.handle, ctypes.byref(self._handle)),
+            "k5_simulation_create")
+
+    def reset(self):
+        """Back to the first location; the material is left as it is."""
+        _check(self._lib, self._lib.k5_simulation_reset(self._handle), "k5_simulation_reset")
+
+    def step(self):
+        """The next location that has a solution, cut. False when the path is exhausted."""
+        stepped = ctypes.c_int()
+        _check(self._lib, self._lib.k5_simulation_step(self._handle, ctypes.byref(stepped)),
+               "k5_simulation_step")
+        return bool(stepped.value)
+
+    def run(self):
+        """All the remaining locations."""
+        _check(self._lib, self._lib.k5_simulation_run(self._handle), "k5_simulation_run")
+
+    def progress(self):
+        """(locations passed, locations of the path, finished)."""
+        index, count, finished = ctypes.c_size_t(), ctypes.c_size_t(), ctypes.c_int()
+        _check(self._lib, self._lib.k5_simulation_progress(self._handle, ctypes.byref(index),
+                                                           ctypes.byref(count), ctypes.byref(finished)),
+               "k5_simulation_progress")
+        return index.value, count.value, bool(finished.value)
+
+    def gouges(self):
+        """(count, first step, first point) of the gouges so far; the last two mean nothing at count 0."""
+        count, first = ctypes.c_size_t(), ctypes.c_size_t()
+        point = (ctypes.c_double * 3)()
+        _check(self._lib, self._lib.k5_simulation_gouges(self._handle, ctypes.byref(count),
+                                                         ctypes.byref(first), point), "k5_simulation_gouges")
+        return count.value, first.value, tuple(point)
+
+    def close(self):
+        if self._handle:
+            self._lib.k5_simulation_free(self._handle)
+            self._handle = _simulation_t()
 
     def __enter__(self):
         return self

@@ -195,13 +195,22 @@ Things worth doing to it on purpose: pick two faces (the report view says it wor
 hole through the box with a cylinder and work on the holed top face (the passes come apart at the
 hole instead of crossing it); set the points per pass to 1 (refused with a reason).
 
-### One thing about FreeCAD 1.1.1
+### Two things about FreeCAD
 
 A script that leaves a job with **two** tool controllers and then creates an operation hits an
 `UnboundLocalError` in `PathUtils.findToolController`: with no user interface to ask which
 controller to use, it returns a variable it never assigned. Under the interface the question is a
 dialog and nothing goes wrong. `examples/make_test_job.py` therefore removes the job's default
 controller after adding the ball end one; keep to one controller in a headless script of your own.
+
+Before showing the task dialog, FreeCAD asks the view provider of the operation which selection gate
+to put up, and the generic answer looks the operation's name up in a table written into
+`Path/Op/Gui/Selection.py`. The table has no room for an operation from outside and the lookup has no
+default, so the name of this one raised `KeyError` one line before the dialog would have been shown -
+no page, no OK, no Cancel, and no message, because the call comes from C++ which swallows it. The
+view provider in `surface5axis_gui.py` answers the question itself, with the gate the Face operation
+uses, so the table is never consulted. Still an unguarded lookup on FreeCAD's main branch, looked at
+on 2026-10-13, so this is not a workaround to take out again.
 
 ## The tests
 
@@ -210,13 +219,13 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-54 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+47 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
-operation and reads the commands that come out. Without FreeCAD those seven are skipped and the
-other fourteen still run.
+operation and reads the commands that come out. Without FreeCAD those thirteen are skipped and the
+other thirty-four still run.
 
 ## Where things are
 
@@ -224,10 +233,9 @@ other fourteen still run.
 |---|---|
 | `kin5axcam/pathgen.py` | the geometry: the zigzag and the ball centre. No FreeCAD in it |
 | `kin5axcam/surface5axis.py` | the operation: properties, the face, the tool, the commands |
-| `kin5axcam/surface5axis_gui.py` | the task panel and the command registration |
+| `kin5axcam/surface5axis_gui.py` | the task panel, the view provider and the command |
 | `InitGui.py` | two lines: hands the work to `kin5axcam/startup.py` |
 | `kin5axcam/startup.py` | waits for the CAM workbench, then registers the command |
-| `kin5axcam/selectionmode.py` | gets this operation past FreeCAD's hard-coded selection table |
 | `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
 | `tests/` | the two halves of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |

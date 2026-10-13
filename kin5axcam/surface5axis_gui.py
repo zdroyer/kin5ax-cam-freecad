@@ -23,13 +23,10 @@ import FreeCADGui
 import Path.Op.Gui.Base as PathOpGui
 from PySide import QtCore, QtGui
 
-from kin5axcam import selectionmode, surface5axis
+import Path.Base.SetupSheet as PathSetupSheet
+import Path.Op.Gui.Selection as PathSelection
 
-#Before the task dialog of an operation is shown, FreeCAD asks its selection table which gate this
-#operation works with, and that table has no room for one from outside: the lookup raises KeyError
-#inside ViewProvider.setEdit, before the dialog, so nothing appears at all. This puts this operation
-#in reach of the answer. See kin5axcam/selectionmode.py.
-selectionmode.install()
+from kin5axcam import surface5axis
 
 translate = FreeCAD.Qt.translate
 QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
@@ -37,9 +34,6 @@ QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
 #the icon of the command: a toolpath on the aerofoil of a turbine blade, drawn in the colours the
 #operations of the CAM workbench use
 ICON_NAME = "kin5axcam_Surface5Axis"
-#What Path.Op.Gui.Base.ViewProvider makes of that name when it wants the icon of the operation in
-#the tree: it builds ":/icons/<name>.svg" and asks for that, so that name is registered as well.
-TREE_ICON_NAME = ":/icons/%s.svg" % ICON_NAME
 ICON_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "Resources", "icons", "Surface5Axis.svg")
 
@@ -55,11 +49,7 @@ def icon():
         FreeCAD.Console.PrintWarning("kin5axcam: the icon is missing from %s\n" % ICON_FILE)
         return "CAM_3DSurface"                   #the icon of the three-axis surface operation
     try:
-        #Twice, under two names, because two different things ask for this picture: the command asks
-        #for the plain name, and the view provider of an operation asks for the resource path it
-        #builds out of that name. Both are registered, and both find the same file.
         FreeCADGui.addIcon(ICON_NAME, ICON_FILE)
-        FreeCADGui.addIcon(TREE_ICON_NAME, ICON_FILE)
         return ICON_NAME
     except Exception:
         return ICON_FILE
@@ -161,15 +151,68 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         ]
 
 
-Command = PathOpGui.SetupOperation(
+class ViewProvider(PathOpGui.ViewProvider):
+    """The generic view provider of an operation, with the two things it cannot know settled here.
+
+    **The selection gate.** Before showing the task dialog, setEdit asks the view provider which
+    gate the operation wants - what the user may click on while the dialog is open - and the generic
+    answer looks the operation's name up in a table written into Path/Op/Gui/Selection.py. That
+    table has no room for an operation from outside and the lookup has no default, so the name of
+    this one raised KeyError inside setEdit, one line before the dialog would have been shown: no
+    page, no OK, no Cancel, and no message, because setEdit is called from C++ which swallows it.
+    (Still so on the main branch of FreeCAD, looked at on 2026-10-13.) Answering the question here
+    means the table is never consulted. The answer is the gate the Face operation uses, which lets a
+    face be picked, and a face is what this operation works on.
+
+    **The icon.** The generic view provider builds ":/icons/<name>.svg" out of the name the command
+    was registered with and asks for that, which resolves for a picture compiled into FreeCAD and
+    for nothing an addon can offer - so the operation had no icon in the tree. The file itself goes
+    in instead, which the tree and the task page both take.
+    """
+
+    def __init__(self, vobj, resources):
+        super(ViewProvider, self).__init__(vobj, resources)
+        if os.path.isfile(ICON_FILE):
+            self.OpIcon = ICON_FILE
+
+    def getSelectionFactory(self):
+        """The gate of the Face operation, rather than a lookup this operation cannot be in."""
+        return PathSelection.pocketselect
+
+
+class Command(PathOpGui.CommandPathOp):
+    """What the button does: FreeCAD's own, with the view provider above put in place of the generic one.
+
+    Everything that matters about creating an operation - the transaction, choosing the job when
+    there is more than one, what to do when there is no tool controller - belongs to FreeCAD and is
+    left to it. The only thing changed is which class is used for the view provider, and only for
+    the length of this call, because the name of that class is how PathOpGui.Create reaches it and
+    there is no argument for it.
+    """
+
+    def Activated(self):
+        generic = PathOpGui.ViewProvider
+        PathOpGui.ViewProvider = ViewProvider
+        try:
+            return PathOpGui.CommandPathOp.Activated(self)
+        finally:
+            PathOpGui.ViewProvider = generic
+
+
+Resources = PathOpGui.CommandResources(
     "Surface5Axis",
     surface5axis.Create,
     TaskPanelOpPage,
     icon(),
     QT_TRANSLATE_NOOP("CAM_Surface5Axis", "3D Surface (5axis)"),
+    None,
     QT_TRANSLATE_NOOP("CAM_Surface5Axis",
                       "Zigzag over the U,V space of a single face, cut with a ball nose tool"),
-    surface5axis.SetupProperties,
 )
+
+#what PathOpGui.SetupOperation would do, done here because the command is this one and not the generic
+Command = Command(Resources)
+FreeCADGui.addCommand("CAM_Surface5Axis", Command)
+PathSetupSheet.RegisterOperation("Surface5Axis", surface5axis.Create, surface5axis.SetupProperties)
 
 FreeCAD.Console.PrintLog("Loading kin5axcam 3D Surface (5axis)... done\n")

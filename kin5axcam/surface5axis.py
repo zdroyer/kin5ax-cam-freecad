@@ -58,47 +58,78 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
     """A zigzag over the U,V space of a single face, cut with the ball of a ball nose tool."""
 
     def opFeatures(self, obj):
-        """The tool, the depths, the heights to retract to, coolant, and one face to work on.
+        """What this operation has, which is also what the task dialog is made of.
 
-        These are the features that put the standard pages in the task dialog:
-        the base geometry page to pick the face, the depths page, the heights
-        page, and the tool and coolant on the page of the operation itself.
+        The base geometry page comes from FeatureBaseFaces, the depths and the
+        step down from FeatureDepths and FeatureStepDown, the heights from
+        FeatureHeights, and the tool and the coolant sit on the page of the
+        operation itself.
+
+        Not here: FeatureFinishDepth, which is the depth of the last pass of a
+        roughing sequence. This operation follows the surface, so its last band
+        is the finish already and a separate finish depth would mean nothing.
         """
         return (
             PathOp.FeatureTool
             | PathOp.FeatureDepths
+            | PathOp.FeatureStepDown
             | PathOp.FeatureHeights
+            | PathOp.FeatureStartPoint
             | PathOp.FeatureCoolant
             | PathOp.FeatureBaseFaces
         )
 
     def initOperation(self, obj):
-        """The properties of the operation."""
-        obj.addProperty(
-            "App::PropertyInteger", "Rows", PROPERTY_GROUP,
-            translate("Surface5Axis", "How many passes are laid across the face. Counted in the "
-                      "parameter space of the surface, so a face whose parameters run unevenly "
-                      "gets unevenly spaced passes."))
-        obj.addProperty(
-            "App::PropertyInteger", "PointsPerRow", PROPERTY_GROUP,
-            translate("Surface5Axis", "How many points are put along each pass. The path is a "
-                      "chain of straight moves between them, so more points follow the surface "
-                      "more closely and make a longer program."))
-        obj.addProperty(
-            "App::PropertyEnumeration", "PathDirection", PROPERTY_GROUP,
-            translate("Surface5Axis", "Which parameter of the surface a pass sweeps: U for passes "
-                      "at constant v, V for passes at constant u."))
-        obj.addProperty(
-            "App::PropertyBool", "ZigZag", PROPERTY_GROUP,
-            translate("Surface5Axis", "Cut there and back, each pass running against the one "
-                      "before it. Switched off, every pass runs the same way and the tool "
-                      "returns through the air."))
-        obj.addProperty(
-            "App::PropertyBool", "InvertNormal", PROPERTY_GROUP,
-            translate("Surface5Axis", "Put the tool on the other side of the face. The normal of "
-                      "a face can point either way depending on how the shape was built, and the "
-                      "tool goes to the side it points at."))
+        """The properties of the operation, the first time one is made."""
+        self.ensureProperties(obj)
+
+    def opOnDocumentRestored(self, obj):
+        """A document saved by an older version of this addon may be missing a property.
+
+        Adding what is missing rather than assuming it is there is what lets an
+        operation saved last month open today. The enumeration needs its list of
+        values back as well: the chosen value survives in the file, the list of
+        what could have been chosen does not.
+        """
+        self.ensureProperties(obj)
+
+    def ensureProperties(self, obj):
+        """Adds whatever property is not there yet, and leaves the values of those that are."""
+        if not hasattr(obj, "Rows"):
+            obj.addProperty(
+                "App::PropertyInteger", "Rows", PROPERTY_GROUP,
+                translate("Surface5Axis", "How many passes are laid across the face. Counted in "
+                          "the parameter space of the surface, so a face whose parameters run "
+                          "unevenly gets unevenly spaced passes."))
+        if not hasattr(obj, "PointsPerRow"):
+            obj.addProperty(
+                "App::PropertyInteger", "PointsPerRow", PROPERTY_GROUP,
+                translate("Surface5Axis", "How many points are put along each pass. The path is a "
+                          "chain of straight moves between them, so more points follow the surface "
+                          "more closely and make a longer program."))
+        if not hasattr(obj, "PathDirection"):
+            obj.addProperty(
+                "App::PropertyEnumeration", "PathDirection", PROPERTY_GROUP,
+                translate("Surface5Axis", "Which parameter of the surface a pass sweeps: U for "
+                          "passes at constant v, V for passes at constant u."))
+        if not hasattr(obj, "ZigZag"):
+            obj.addProperty(
+                "App::PropertyBool", "ZigZag", PROPERTY_GROUP,
+                translate("Surface5Axis", "Cut there and back, each pass running against the one "
+                          "before it. Switched off, every pass runs the same way and the tool "
+                          "returns through the air."))
+        if not hasattr(obj, "InvertNormal"):
+            obj.addProperty(
+                "App::PropertyBool", "InvertNormal", PROPERTY_GROUP,
+                translate("Surface5Axis", "Put the tool on the other side of the face. The normal "
+                          "of a face can point either way depending on how the shape was built, "
+                          "and the tool goes to the side it points at."))
+        #The values the enumeration may take. Setting the list clears the choice, so the choice goes
+        #back afterwards - on a restored document that is the one the file carried.
+        chosen = obj.PathDirection if hasattr(obj, "PathDirection") else None
         obj.PathDirection = ["U", "V"]
+        if chosen:
+            obj.PathDirection = chosen
 
     def opSetDefaultValues(self, obj, job):
         """Something sensible to start from: twenty passes of sixty points, there and back."""
@@ -211,8 +242,12 @@ class ObjectSurface5Axis(PathOp.ObjectOp):
         except ValueError as problem:
             Path.Log.error("%s: %s" % (obj.Label, problem))
             return
-        passes = pathgen.clip_to_depths(passes, quantity_value(obj.FinalDepth),
-                                        quantity_value(obj.StartDepth), radius)
+        passes = pathgen.in_layers(passes, quantity_value(obj.StepDown),
+                                   quantity_value(obj.FinalDepth),
+                                   quantity_value(obj.StartDepth), radius)
+        if getattr(obj, "UseStartPoint", False):
+            start = obj.StartPoint
+            passes = pathgen.start_near(passes, (start.x, start.y, start.z))
         if not passes:
             Path.Log.warning(
                 translate("Surface5Axis", "%s found nothing to cut on that face between the final "

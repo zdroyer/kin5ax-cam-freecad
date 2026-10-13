@@ -49,15 +49,26 @@ to be at least two points, since one point cuts nothing.
 | `ZigZag` | cut there and back, rather than returning through the air |
 | `InvertNormal` | put the tool on the other side of the face |
 
-The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths**,
-**Heights**, and the tool controller and the coolant on the page of the operation itself. The depths
-mean what they say: the tip of the ball is kept between the final and the start depth, and a pass
-that leaves the range comes apart there, so the tool lifts over what it may not cut rather than
-dragging through it. The depths the operation suggests are the top and the bottom of the face, so by
-default nothing is held back.
+The task dialog has the pages any operation has: **Base Geometry** to pick the face, **Depths** with
+the step down, **Heights**, a **start point**, and the tool controller and the coolant on the page of
+the operation itself.
 
-Not here, and not pretended at: a step down (this is a finishing pass in one go, not a roughing
-strategy) and a start point.
+The depths mean what they say: the tip of the ball is kept between the final and the start depth, and
+a pass that leaves the range comes apart there, so the tool lifts over what it may not cut rather
+than dragging through it. The depths the operation suggests are the top and the bottom of the face,
+so by default nothing is held back.
+
+The **step down** cuts the depth in bands from the top down, none deeper than the step. Each point is
+cut once, in the band it falls into, rather than the whole path being repeated at every level: a
+point already cut needs no second visit, and the tool would only be moving through air if it had one.
+A step down of zero, or one that covers the whole range, is a single band, which is the path as it
+was.
+
+The **start point**, when switched on, settles which end of the path the tool begins at: the zigzag
+is kept as it is and only its direction is decided, by whichever of its two ends is nearer the point.
+
+Not here: a finish depth. That is the depth of the last pass of a roughing sequence, and this
+operation follows the surface, so its last band is the finish already.
 
 The operation refuses, with a message in the report view rather than a silent wrong path: a tool
 that is not a ball nose one, no face, more than one face, and parameters that cannot make a path.
@@ -199,7 +210,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-44 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+54 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

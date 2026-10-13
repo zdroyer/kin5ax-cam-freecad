@@ -37,6 +37,9 @@ QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
 #the icon of the command: a toolpath on the aerofoil of a turbine blade, drawn in the colours the
 #operations of the CAM workbench use
 ICON_NAME = "kin5axcam_Surface5Axis"
+#What Path.Op.Gui.Base.ViewProvider makes of that name when it wants the icon of the operation in
+#the tree: it builds ":/icons/<name>.svg" and asks for that, so that name is registered as well.
+TREE_ICON_NAME = ":/icons/%s.svg" % ICON_NAME
 ICON_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "Resources", "icons", "Surface5Axis.svg")
 
@@ -52,7 +55,11 @@ def icon():
         FreeCAD.Console.PrintWarning("kin5axcam: the icon is missing from %s\n" % ICON_FILE)
         return "CAM_3DSurface"                   #the icon of the three-axis surface operation
     try:
+        #Twice, under two names, because two different things ask for this picture: the command asks
+        #for the plain name, and the view provider of an operation asks for the resource path it
+        #builds out of that name. Both are registered, and both find the same file.
         FreeCADGui.addIcon(ICON_NAME, ICON_FILE)
+        FreeCADGui.addIcon(TREE_ICON_NAME, ICON_FILE)
         return ICON_NAME
     except Exception:
         return ICON_FILE

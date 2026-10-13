@@ -168,6 +168,52 @@ def clip_to_depths(passes, bottom, top, tool_radius, tolerance=1.0e-7):
     return kept
 
 
+def in_layers(passes, step_down, bottom, top, tool_radius):
+    """The passes cut in bands from the top down, none of them deeper than step_down.
+
+    A surface operation that takes the whole depth in one go asks the tool to plunge the full height
+    of the part at the first steep place. Cutting in bands takes the top off first and works down, so
+    each band removes at most step_down of material.
+
+    Each point is cut once, in the band it falls into, rather than the whole path being repeated at
+    every level: a point already cut does not need visiting again, and the tool would only be moving
+    through air if it did. A step down of zero, or one that covers the whole range, is one band -
+    which is the path as it was.
+    """
+    if step_down <= 0.0 or top - bottom <= step_down:
+        return clip_to_depths(passes, bottom, top, tool_radius)
+    layers = []
+    level = top
+    while level > bottom:
+        lower = max(bottom, level - step_down)
+        layers.extend(clip_to_depths(passes, lower, level, tool_radius))
+        level = lower
+    return layers
+
+
+def start_near(passes, point):
+    """The passes arranged so the path starts at whichever of its two ends is nearest the point.
+
+    The zigzag is kept as it is - only its direction is settled. There are four ways round for a path
+    that runs there and back: begin at either end of the first pass or either end of the last, which
+    is to say the list of passes may be reversed and each pass with it.
+    """
+    if not passes:
+        return passes
+    candidates = (
+        (passes, False),
+        ([list(reversed(one)) for one in reversed(passes)], True),
+    )
+    best, best_distance = passes, None
+    for arrangement, _ in candidates:
+        first = arrangement[0][0].point
+        distance = ((first[0] - point[0]) ** 2 + (first[1] - point[1]) ** 2
+                    + (first[2] - point[2]) ** 2)
+        if best_distance is None or distance < best_distance:
+            best, best_distance = arrangement, distance
+    return best
+
+
 def generate_passes(surface, params):
     """The passes of a zigzag over the parameter space of one face.
 

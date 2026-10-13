@@ -216,6 +216,38 @@ class TheOperation(unittest.TestCase):
         self.document.recompute()
         self.assertEqual(self.ROWS * (self.POINTS - 1), len(self.cuttingMoves(operation)))
 
+    def test_the_operation_has_what_the_face_operation_has(self):
+        """Step down and start point, which are features and therefore pages and properties."""
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        for name in ("StepDown", "UseStartPoint", "StartPoint"):
+            self.assertTrue(hasattr(operation, name), "the operation has no %s" % name)
+
+    def test_a_restored_document_gets_any_property_it_is_missing(self):
+        """An operation saved before a property existed has to open, not break."""
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        operation.PathDirection = "V"
+        operation.removeProperty("ZigZag")
+        self.assertFalse(hasattr(operation, "ZigZag"))
+        operation.Proxy.opOnDocumentRestored(operation)
+        self.assertTrue(hasattr(operation, "ZigZag"), "the missing property was put back")
+        self.assertEqual("V", operation.PathDirection,
+                         "and the chosen value of the enumeration survived its list being set")
+
+    def test_the_start_point_decides_which_end_the_path_begins_at(self):
+        self.makeBitABallNose()
+        operation = self.createOperation()
+        first = self.cuttingMoves(operation)[0].Parameters
+        self.assertLess(first["X"], 0.5 * self.LENGTH, "it begins at the near end by default")
+
+        operation.UseStartPoint = True
+        operation.StartPoint = FreeCAD.Vector(self.LENGTH, self.WIDTH, self.HEIGHT)
+        self.document.recompute()
+        turned = self.cuttingMoves(operation)[0].Parameters
+        self.assertGreater(turned["X"], 0.5 * self.LENGTH,
+                           "asked to start at the far corner, it begins there")
+
     def test_a_tool_that_is_not_a_ball_nose_one_cuts_nothing(self):
         tool = self.toolController.Tool
         tool.ShapeType = "Endmill"

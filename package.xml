@@ -21,6 +21,7 @@
       <description>
         Adds the command CAM_Surface5Axis to the CAM workbench. It is not a workbench of its own.
       </description>
+      <icon>Resources/icons/Surface5Axis.svg</icon>
     </workbench>
   </content>
 </package>

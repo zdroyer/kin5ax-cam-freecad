@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  3D Surface (5axis): a toolpath running up and down the aerofoil of a turbine blade.
+
+  The colours are the ones the CAM operations of FreeCAD use, which are Tango: the part in sky blue
+  #729fcf with #587ca3 and #3465a4 for what is turned away, the toolpath in chameleon green #73d216,
+  everything outlined in aluminium #2e3436.
+
+  Drawn to the measurements of the operations already on that toolbar: at the 32 pixels the toolbar
+  renders, their green lines are 3 pixels wide, green covers between a quarter and a half of the
+  coloured area, the outlines are heavy, and the drawing fills the square. Three passes, not a dozen:
+  at sixteen pixels a dozen is a smudge.
+
+  The passes run up and down the blade rather than across it, parallel to the leading and the
+  trailing edge. Lines that follow the edges of a shape are read as lying on it, the way the contours
+  of a map are; lines that cut across it are read as being in front of it.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1"
+     width="64" height="64" viewBox="0 0 64 64">
+  <!-- scaled up about the middle to fill the square the way the other operations do, which
+       thickens the outlines with it -->
+  <g stroke="#2e3436" stroke-linejoin="round" stroke-linecap="round"
+     transform="translate(32,32.75) scale(1.12) translate(-32,-32.75)">
+
+    <!-- the platform the blade stands on, seen a little from above -->
+    <path d="M 17,51 L 49,51 L 59,60 L 5,60 Z" fill="#3465a4" stroke-width="3"/>
+    <path d="M 17,51 L 49,51 L 51,54 L 14,54 Z" fill="#4b6b8d" stroke="none"/>
+
+    <!-- the blade: the leading edge bows out to the left, the tip is twisted over to the right -->
+    <path d="M 22,51
+             C 13.5,42 11,30 14,19
+             C 15.5,13 18,9.5 21,7.5
+             L 40,5.5
+             C 46,14 52,25 53,34
+             C 54,43 51,48.5 47,51
+             Z"
+          fill="#729fcf" stroke-width="3"/>
+
+    <!-- the convex side of the aerofoil, turned away from the light -->
+    <path d="M 40,5.5
+             C 46,14 52,25 53,34
+             C 54,43 51,48.5 47,51
+             L 38,51
+             C 42,48.5 45,43 44,34
+             C 43,25 37,14 33,6.2
+             Z"
+          fill="#587ca3" stroke="none"/>
+    <path d="M 33,6.2 C 37,14 43,25 44,34 C 45,43 42,48.5 38,51" fill="none" stroke-width="1.8"/>
+
+    <!-- The toolpath: three passes up and down the blade with a step over at each end, one
+         continuous line. They run parallel to the leading and the trailing edge, which is what makes
+         them read as lying on the surface rather than crossing the view of it, and every point of
+         the line is inside the outline: the edges were measured at each height and the line kept a
+         stroke width and a margin clear of both. -->
+    <g fill="none">
+      <path d="M 26.4,45
+               C 22.6,38 21.6,34 22.7,29.5
+               C 23.6,23 22.2,18 22.8,13.8
+               C 25,12.6 27.5,12.8 29.8,13.4
+               C 30.8,19 32.2,24.5 32.6,30
+               C 33.1,36 34.2,40.5 34.9,44.6
+               C 37.5,45.4 40.5,45.4 43.1,44.8
+               C 43.6,39 43.4,34 42.4,29.8
+               C 41.3,23 39.2,17 37.3,12.6" stroke="#2e3436" stroke-width="6.6"/>
+      <path d="M 26.4,45
+               C 22.6,38 21.6,34 22.7,29.5
+               C 23.6,23 22.2,18 22.8,13.8
+               C 25,12.6 27.5,12.8 29.8,13.4
+               C 30.8,19 32.2,24.5 32.6,30
+               C 33.1,36 34.2,40.5 34.9,44.6
+               C 37.5,45.4 40.5,45.4 43.1,44.8
+               C 43.6,39 43.4,34 42.4,29.8
+               C 41.3,23 39.2,17 37.3,12.6" stroke="#73d216" stroke-width="4.6"/>
+    </g>
+  </g>
+</svg>

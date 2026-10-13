@@ -61,7 +61,8 @@ Copy or symlink this directory into FreeCAD's `Mod` folder:
 | Windows | `%APPDATA%\FreeCAD\Mod\kin5axcam` |
 | Linux | `~/.local/share/FreeCAD/Mod/kin5axcam` |
 
-It registers the command `CAM_Surface5Axis` the first time the CAM workbench is activated. An addon
+It registers the command `CAM_Surface5Axis`, with its own icon, the first time the CAM workbench is
+activated. An addon
 cannot add a button to the toolbar of a workbench it does not own, so reach it either through
 **Tools → Customize → Toolbars** (add it to a CAM toolbar of your own), or from the Python console
 with a CAM Job active:
@@ -162,6 +163,7 @@ other fourteen still run.
 | `kin5axcam/surface5axis.py` | the operation: properties, the face, the tool, the commands |
 | `kin5axcam/surface5axis_gui.py` | the task panel and the command registration |
 | `InitGui.py` | registers the command when CAM is first activated |
+| `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
 | `tests/` | the two halves of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |
 

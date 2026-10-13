@@ -12,6 +12,8 @@ Python console:
     FreeCADGui.runCommand("CAM_Surface5Axis")
 """
 
+import os
+
 import FreeCAD
 import FreeCADGui
 import Path.Op.Gui.Base as PathOpGui
@@ -21,6 +23,29 @@ from kin5axcam import surface5axis
 
 translate = FreeCAD.Qt.translate
 QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
+
+#the icon of the command: a toolpath on the aerofoil of a turbine blade, drawn in the colours the
+#operations of the CAM workbench use
+ICON_NAME = "kin5axcam_Surface5Axis"
+ICON_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "Resources", "icons", "Surface5Axis.svg")
+
+
+def icon():
+    """The name the icon is registered under, or the file itself when it cannot be registered.
+
+    FreeCAD keeps icons in a registry a command looks its picture up in, and an addon puts its own
+    there with addIcon. A FreeCAD without that call, or a name already taken, leaves the file path,
+    which the command resources also accept.
+    """
+    if not os.path.isfile(ICON_FILE):
+        FreeCAD.Console.PrintWarning("kin5axcam: the icon is missing from %s\n" % ICON_FILE)
+        return "CAM_3DSurface"                   #the icon of the three-axis surface operation
+    try:
+        FreeCADGui.addIcon(ICON_NAME, ICON_FILE)
+        return ICON_NAME
+    except Exception:
+        return ICON_FILE
 
 
 class TaskPanelOpPage(PathOpGui.TaskPanelPage):
@@ -104,7 +129,7 @@ Command = PathOpGui.SetupOperation(
     "Surface5Axis",
     surface5axis.Create,
     TaskPanelOpPage,
-    "CAM_3DSurface",
+    icon(),
     QT_TRANSLATE_NOOP("CAM_Surface5Axis", "3D Surface (5axis)"),
     QT_TRANSLATE_NOOP("CAM_Surface5Axis",
                       "Zigzag over the U,V space of a single face, cut with a ball nose tool"),

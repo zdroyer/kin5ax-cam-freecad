@@ -13,10 +13,11 @@ with **any shape of tool**. It is the toolpath source for the five-axis postproc
 the part, which is what kin5ax solves for. A move without them is a move of a tool standing up, so a
 `Vertical` path is readable by anything that reads G-code.
 
-What reads the vector is the postprocessor below. FreeCAD's **simulator** never will: it places the
-tool with a fixed upright rotation (`Path/Main/Gui/SimulatorGL.py`), so a leaning path is drawn and
-simulated as if the tool stood up. Nothing the operation emits can tip it; that view comes with the
-kin5ax machine simulation.
+What reads the vector is the postprocessor below — either handing it to a control that has TCP, or
+solving it with kin5ax for a machine and writing the five axes. FreeCAD's **simulator** never will:
+it places the tool with a fixed upright rotation (`Path/Main/Gui/SimulatorGL.py`), so a leaning path
+is drawn and simulated as if the tool stood up. Nothing the operation emits can tip it; that view
+comes with the kin5ax machine simulation.
 
 ## The point the path carries
 
@@ -164,6 +165,55 @@ operation is posted exactly as the stock post posts it.
 Mind that **`G49` cancels the tool length offset** along with the mode, so an operation that follows
 a five-axis one, on the same tool, needs its offset set up again. The post says so in a comment where
 it cancels. A tilted working plane — `G68.2` and the rest — is later work.
+
+### Direct axes: `--machine`
+
+```
+--machine "C:/path/to/Reiden_RX10_A_SwivelHead_C_RotaryTable.kc.json"
+```
+
+With a kinematic chain file of kin5ax, every move of every operation is **solved for that machine**
+and written as its five axes — `G1 X.. Y.. Z.. A.. C..` — instead of as a vector. No `G43.5`, and no
+tool length offset either: the length of the tool is in the model the solver is given, so the joint
+values already allow for it, and the program is run with the offset cancelled. This is the one mode
+that runs on a control with no TCP option, and it is what the kinematics are for.
+
+What goes in: the tip of the tool and its axis from every `G0`/`G1`, carried forward word by word the
+way a control carries them — the tool standing up until a move says otherwise, so a three-axis
+operation is solved too, with the rotary axes wherever the start criterion puts them. A ball nose
+tool is handed over at the centre of its ball, which is where kin5ax programs it. The frame of the
+part in FreeCAD is taken to be the frame of the material on the machine.
+
+What comes out: one line per location, the ones kin5ax invents between two moves included (the
+default is a step of no more than 1/100 of the chain's unit and a turn of no more than one degree;
+`--max-step`, `--max-turn`, `--no-interpolation`). A free rotary axis is written the nearest turn to
+its last value, so a table never sweeps 360° between two lines that mean the same position. A
+location the solver cannot place is **left out** and said so — `(UNSOLVED: ... AT X.. Y.. Z..)` where
+the line would have been, a count at the end of the operation, and a warning in the report view.
+
+| argument | |
+|---|---|
+| `--machine-unit m\|mm` | the length unit of the chain file; `m` for the machines kin5ax ships, and the default |
+| `--rotary-letters AC` | what the control calls the two rotary axes; the default is the names of the links when they are letters |
+| `--holder-length 50`, `--holder-radius 30` | the holder, in mm, which a tool bit of FreeCAD does not describe |
+| `--no-limits`, `--no-collisions` | leave a check out |
+| `--start MIN\|MAX\|MIN_ABS\|SHORTEST` | where the trajectory starts, by the first rotary axis |
+
+Arcs and canned cycles are refused with a message: the solver takes lines, and a `G2` has to be
+written as lines before it can be solved. The shank is taken as wide as the cutter, which flags a
+collision sooner rather than later.
+
+### The library it calls
+
+`kin5axcam/kin5ax.py` is a `ctypes` binding to `kin5axc`, the C interface of the library — a chain,
+a tool, the settings, a path solved in memory and read back location by location, the frames of the
+machine for drawing it. No FreeCAD in it; it is usable from any Python. The shared library is looked
+for at the path in `KIN5AXC_LIBRARY`, in `kin5axcam/lib/`, and in the build trees of a checkout,
+in that order; the error of a failed load lists every place it tried.
+
+Lengths cross that boundary **in the unit of the chain file**, which the file does not state and
+which is metres for every machine shipped with kin5ax. The post scales by `--machine-unit`; anything
+else calling the binding scales for itself.
 
 The file keeps the licence it came from, **LGPL-2.1-or-later**, not the MIT of the rest of kin5ax,
 and keeps its FreeCAD copyright lines. Being a copy rather than a rewrite means a fix to FreeCAD's
@@ -323,14 +373,18 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-72 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+99 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
 operation and reads the commands that come out. `tests/test_post.py` posts a leaning path through
-the postprocessor and reads the G-code back, word by word. Without FreeCAD those twenty-eight are
-skipped and the other forty-four still run.
+the postprocessor and reads the G-code back, word by word — with a vector, and solved for the
+trunnion table of the library's test set, where the forward kinematics of the library is the
+oracle: the joint values of the last line, put back into the chain, have to give the ball centre of
+the last move. `tests/test_kin5ax.py` checks the binding against the same oracle. Without FreeCAD
+thirty-seven are skipped and the other sixty-two still run; the ones that need the shared library
+skip when it is not built.
 
 ## Where things are
 
@@ -342,7 +396,8 @@ skipped and the other forty-four still run.
 | `InitGui.py` | two lines: hands the work to `kin5axcam/startup.py` |
 | `kin5axcam/startup.py` | waits for the CAM workbench, then registers the command |
 | `Resources/icons/Surface5Axis.svg` | the icon of the command: a toolpath on a turbine blade |
-| `post/fanuc_tcp_kin5ax_post.py` | the postprocessor: the whole vector, and the TCP mode round it |
+| `kin5axcam/kin5ax.py` | kin5ax from Python: a ctypes binding to the C interface of the library |
+| `post/fanuc_tcp_kin5ax_post.py` | the postprocessor: the whole vector with TCP, or the five axes solved by kin5ax |
 | `kin5axcam/postinstall.py` | copies that file where FreeCAD looks for postprocessors |
 | `tests/` | the three parts of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |

@@ -25,8 +25,26 @@ except ImportError:                                 # a plain Python: nothing he
 
 needs_freecad = unittest.skipIf(FreeCAD is None, "FreeCAD is not importable: run with freecadcmd")
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#the real path: inside FreeCAD the addon is reached through a junction from the Mod folder, and the
+#test chains of the repository sit next to where the files really are
+HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 POST_FILE = os.path.join(HERE, "post", "fanuc_tcp_kin5ax_post.py")
+#a trunnion table of the test set of the library: A tilts, C turns the workpiece, lengths in metres
+CHAIN = os.path.join(os.path.dirname(HERE), "kin5axTests", "TestChains", "AC_TiltRotaryTable.kc")
+
+
+def library_is_there():
+    from kin5axcam import kin5ax
+
+    try:
+        kin5ax.load()
+        return True
+    except kin5ax.Kin5axError:
+        return False
+
+
+needs_machine = unittest.skipUnless(os.path.isfile(CHAIN) and library_is_there(),
+                                    "the kin5axc library or the test chain is not there")
 
 
 def the_post():
@@ -100,9 +118,8 @@ class InstallingIt(unittest.TestCase):
             self.assertIn("G43.5", copied.read())
 
 
-@needs_freecad
-class ThePostOfALeaningPath(unittest.TestCase):
-    """A box, a ball nose tool and the operation leaning over, posted and read back."""
+class ALeaningPathToPost(unittest.TestCase):
+    """A box, a ball nose tool and the operation leaning over: what both classes below post."""
 
     LENGTH, WIDTH, HEIGHT = 100.0, 50.0, 10.0
     DIAMETER = 6.0
@@ -150,6 +167,11 @@ class ThePostOfALeaningPath(unittest.TestCase):
 
     def posted(self, arguments="--no-show-editor --no-header"):
         return self.post.export([self.operation], "-", arguments)
+
+
+@needs_freecad
+class ThePostOfALeaningPath(ALeaningPathToPost):
+    """Posted with the vector, for the control to solve."""
 
     def test_every_cutting_move_carries_the_whole_vector(self):
         """The K word is the point of this post: without it the orientation is half written."""
@@ -241,6 +263,161 @@ class ThePostOfALeaningPath(unittest.TestCase):
         self.assertAlmostEqual(0.5, words["I"], delta=1e-6, msg="12.7 mm is half an inch")
         self.assertNotIn("K", words, "nothing to say about an arc in the XY plane")
         self.assertNotIn("G43.5", gcode, "an arc centre is not a tool axis")
+
+
+@needs_freecad
+@needs_machine
+class ThePostWithAMachine(ALeaningPathToPost):
+    """--machine: every move solved by kin5ax and written as the five axes of the AC table."""
+
+    def machined(self, more=""):
+        return self.posted('--no-show-editor --no-header --machine "%s" %s' % (CHAIN, more))
+
+    def axis_lines(self, gcode):
+        """The lines that move, with the modal words filled in: a list of (command, words)."""
+        lines = []
+        command = None
+        words = {}
+        for line in gcode.splitlines():
+            line = line.strip()
+            if not line or line.startswith("(") or line.startswith("%"):
+                continue
+            if line.startswith("G0") or line.startswith("G1"):
+                command = line.split()[0]
+            elif line.startswith("G") or line.startswith("M"):
+                command = None
+                continue
+            if command is None:
+                continue
+            words = dict(words)
+            words.update(words_of(line))
+            if any(letter in words_of(line) for letter in "XYZAC"):
+                lines.append((command, words))
+        return lines
+
+    def test_the_moves_come_out_as_the_axes_of_the_machine_and_nothing_else(self):
+        self.lean()
+        gcode = self.machined()
+        self.assertIn("SOLVED FOR AC TILT-ROTARY TABLE BY KIN5AX", gcode)
+        self.assertNotIn("G43.5", gcode, "direct axes need no tool centre point control")
+        self.assertNotIn("G43 ", gcode, "and no tool length offset: the length is in the model")
+        lines = self.axis_lines(gcode)
+        self.assertGreater(len(lines), self.ROWS * (self.POINTS - 1), "the steps invented between")
+        for command, words in lines:
+            for letter in "XYZAC":
+                self.assertIn(letter, words, "%s %r" % (command, words))
+            for letter in "IJK":
+                self.assertNotIn(letter, words, "a vector in a file of joint values")
+        self.assertIn("(KIN5AX: ", gcode, "the report of the run")
+        self.assertNotIn("(UNSOLVED:", gcode, "every point of a box in front of the machine is reachable")
+
+    def test_the_joint_values_put_the_tip_of_the_tool_where_the_path_had_it(self):
+        """The forward kinematics of the library is the oracle: the last cutting line of the file,
+        put into the chain, has to give the ball centre of the last cutting move of the path."""
+        import math
+
+        from kin5axcam import kin5ax
+
+        self.lean()
+        gcode = self.machined()
+        lines = [(command, words) for command, words in self.axis_lines(gcode) if command == "G1"]
+        self.assertGreater(len(lines), 0)
+        _, words = lines[-1]
+
+        radius = 0.5 * self.DIAMETER
+        last = [c for c in self.operation.Path.Commands if c.Name == "G1" and "X" in c.Parameters][-1]
+        tip = (last.Parameters["X"], last.Parameters["Y"], last.Parameters["Z"])
+        axis = (last.Parameters["I"], last.Parameters["J"], last.Parameters["K"])
+        centre = [tip[i] + radius * axis[i] for i in range(3)]
+
+        #the machine and the tool exactly as the post made them, so that the length of the tool
+        #assembly - which the joint values allow for - is the same on both sides
+        machine = self.post.Machine(CHAIN)
+        tool = machine.makeTool(self.operation)
+        self.assertEqual(kin5ax.TOOL_BALL_NOSE, tool.shape)
+        axes = machine.axes
+        q = [0.0] * kin5ax.AXES
+        q[axes.x] = words["X"] / 1000.0
+        q[axes.y] = words["Y"] / 1000.0
+        q[axes.z] = words["Z"] / 1000.0
+        #the letters of this chain are the names of its links, C and A
+        names = [link.name for link in machine.links]
+        q[names.index("A")] = math.radians(words["A"])
+        q[names.index("C")] = math.radians(words["C"])
+        position, direction = machine.chain.tool_point(q, tool)
+        tool.close()
+        machine.close()
+        for i in range(3):
+            self.assertAlmostEqual(centre[i], position[i] * 1000.0, delta=2e-3,
+                                   msg="the ball centre, to the precision of the file")
+            self.assertAlmostEqual(axis[i], direction[i], delta=2e-3, msg="and the tool axis")
+
+    def test_without_interpolation_there_is_one_line_per_move(self):
+        self.lean()
+        gcode = self.machined("--no-interpolation")
+        #the first moves are folded into the first one that has all of X, Y and Z, and a move that
+        #goes nowhere - the retract the base class of the operation appends after the one of the
+        #operation itself - has every word in common with the line before and so writes nothing
+        expected = 0
+        current, previous, seen = {}, None, set()
+        for c in self.operation.Path.Commands:
+            if c.Name not in ("G0", "G1"):
+                continue
+            current.update((k, c.Parameters[k]) for k in "XYZIJK" if k in c.Parameters)
+            seen.update(k for k in "XYZ" if k in c.Parameters)
+            if len(seen) < 3:
+                continue
+            point = tuple(current.get(k) for k in "XYZIJK")
+            if point != previous:
+                expected += 1
+            previous = point
+        self.assertEqual(expected, len(self.axis_lines(gcode)))
+
+    def test_the_rotary_letters_can_be_said(self):
+        self.lean()
+        gcode = self.machined("--rotary-letters BC")
+        for command, words in self.axis_lines(gcode):
+            self.assertIn("B", words)
+            self.assertNotIn("A", words)
+
+    def test_a_free_rotary_axis_is_never_written_a_full_turn_away_from_its_last_value(self):
+        self.lean()
+        previous = None
+        for command, words in self.axis_lines(self.machined()):
+            if previous is not None:
+                self.assertLessEqual(abs(words["C"] - previous), 180.0 + 1e-9, words)
+            previous = words["C"]
+
+    def test_nothing_is_written_as_minus_nought(self):
+        self.lean()
+        for line in self.machined().splitlines():
+            self.assertNotIn("-0.000 ", line + " ")
+
+    def test_a_part_the_machine_cannot_reach_is_said_so_and_left_out(self):
+        self.lean()
+        self.operation.Base[0][0].Placement.Base = FreeCAD.Vector(5000.0, 0.0, 0.0)
+        self.document.recompute()
+        gcode = self.machined()
+        self.assertIn("(UNSOLVED:", gcode)
+        self.assertEqual([], self.axis_lines(gcode), "no line for a point the machine cannot reach")
+
+    def test_an_arc_is_refused_rather_than_mangled(self):
+        shape = self.document.addObject("Path::Feature", "Arc")
+        shape.Path = Path.Path([
+            Path.Command("G0", {"X": 0.0, "Y": 0.0, "Z": 0.0}),
+            Path.Command("G2", {"X": 25.4, "Y": 0.0, "I": 12.7, "J": 0.0, "F": 100.0}),
+        ])
+        self.document.recompute()
+        gcode = self.post.export([shape], "-", '--no-show-editor --no-header --machine "%s"' % CHAIN)
+        self.assertIsNone(gcode)
+
+    def test_a_tool_standing_up_is_solved_as_well(self):
+        """A three-axis path on a five-axis machine: the rotary axes at the start the settings say."""
+        gcode = self.machined()
+        lines = self.axis_lines(gcode)
+        self.assertGreater(len(lines), 0)
+        for command, words in lines:
+            self.assertAlmostEqual(0.0, words["A"], delta=1e-6, msg="the tool stands up, so A is zero")
 
 
 if __name__ == "__main__":

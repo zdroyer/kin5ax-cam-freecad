@@ -27,6 +27,20 @@ and K, which is what this writes, and G49 cancels it afterwards. Mind that G49
 cancels the tool length offset with it: an operation that comes after a five-axis
 one, with the same tool, has to have its offset set up again.
 
+**With --machine, the moves are solved and written as machine axes.** Given a
+kinematic chain file of kin5ax (.kc or .kc.json), every move of every operation
+is handed to the solver - the tip of the tool and its axis, in the frame of the
+part - and comes back as the five joint values of that machine, written as
+X Y Z and the two rotary letters. No G43.5 then, and no tool length offset
+either: the length of the tool is in the model the solver was given, so the
+program is run with the offset cancelled. This is the one mode that runs on a
+control with no TCP option at all, and it is the mode that needs kin5ax.
+
+The frame of the part in FreeCAD is taken to be the frame of the material of
+the chain file - the origin of the job is where the workpiece sits on the
+machine. A move the solver cannot place is left out of the file and said so, in
+a comment where it would have been and in a count at the end of the operation.
+
 Nothing here knows about a tilted working plane. G68.2 and the rest are the later
 work.
 
@@ -62,6 +76,7 @@ from FreeCAD import Units
 import Path
 import argparse
 import datetime
+import math
 import shlex
 import os.path
 import Path.Base.Util as PathUtil
@@ -78,6 +93,13 @@ I J K) and G49.
 
 Mind that G49 cancels the tool length offset as well, so an operation following
 a five-axis one has to have its offset set up again.
+
+With --machine <chain file> every move is solved by kin5ax instead and written
+as the machine axes X Y Z A C - direct axes, no TCP, the tool length in the
+model. --machine-unit says the unit of the chain file (m for the machines that
+ship with kin5ax), --rotary-letters what the control calls the two rotary
+axes, --holder-length and --holder-radius the holder FreeCAD's tool bits do
+not describe.
 
 It can be used from inside FreeCAD once it is in the macro folder, or from a
 script with:
@@ -159,6 +181,52 @@ parser.add_argument(
     "--vector-precision",
     help="number of digits of the tool axis vector, default=6",
 )
+parser.add_argument(
+    "--machine",
+    help="a kin5ax chain file (.kc or .kc.json): solve every move for that machine and write the "
+    "joint values as X Y Z and the two rotary axes, instead of the tool axis vector",
+)
+parser.add_argument(
+    "--machine-unit",
+    help='the length unit of the chain file, "m" or "mm", default="m"',
+)
+parser.add_argument(
+    "--rotary-letters",
+    help="what the control calls the two rotary axes, in the order of the chain, e.g. AC; the default "
+    "is the names of the links when they are letters, else the guess of kin5ax",
+)
+parser.add_argument(
+    "--holder-length",
+    help="the holder between the tool and the spindle, in mm, which a tool bit does not say; default=50",
+)
+parser.add_argument(
+    "--holder-radius",
+    help="and its radius in mm, default=30",
+)
+parser.add_argument(
+    "--no-limits", action="store_true", help="do not refuse a configuration outside the joint limits"
+)
+parser.add_argument(
+    "--no-collisions", action="store_true", help="do not refuse a configuration whose parts meet"
+)
+parser.add_argument(
+    "--no-interpolation",
+    action="store_true",
+    help="write the moves as they are, with nothing invented between two of them",
+)
+parser.add_argument(
+    "--max-step",
+    help="no invented step longer than this, in mm (default: the setting of kin5ax, 1/100 of its unit)",
+)
+parser.add_argument(
+    "--max-turn",
+    help="nor turning the tool axis further than this, in degrees (default: the setting of kin5ax)",
+)
+parser.add_argument(
+    "--start",
+    help='where the trajectory starts: the first rotary axis at MIN, MAX, MIN_ABS (default) or '
+    'SHORTEST for whatever makes the whole path shortest',
+)
 
 TOOLTIP_ARGS = parser.format_help()
 
@@ -188,6 +256,24 @@ VECTOR_PRECISION = 6
 # The moves on which I, J and K are the tool axis vector. On G2 and G3 they are the centre of the
 # arc, which is a length and is left alone.
 LINEAR_COMMANDS = ("G0", "G00", "G1", "G01")
+RAPID_COMMANDS = ("G0", "G00")
+# What a move the solver cannot take looks like: an arc, or a canned cycle.
+ARC_COMMANDS = ("G2", "G02", "G3", "G03")
+
+# The machine, when the moves are to be solved rather than handed to the control with a vector.
+MACHINE = None
+MACHINE_UNIT_IN_MM = 1000.0               # metres, the unit of the chain files that ship with kin5ax
+ROTARY_LETTERS = None                     # None: the names of the links, or the guess of kin5ax
+HOLDER_LENGTH_MM = 50.0
+HOLDER_RADIUS_MM = 30.0
+CHECK_LIMITS = True
+CHECK_COLLISIONS = True
+INTERPOLATE = True
+MAX_STEP_MM = None
+MAX_TURN_DEGREES = None
+START_CRITERION = None
+# the tool stands up until a move says otherwise
+VERTICAL = (0.0, 0.0, 1.0)
 
 # These globals will be reflected in the Machine configuration of the project
 UNITS = "G21"  # G21 for metric, G20 for us standard
@@ -254,6 +340,17 @@ def processArguments(argstring):
     global TCP_COMMAND
     global TCP_CANCEL
     global VECTOR_PRECISION
+    global MACHINE
+    global MACHINE_UNIT_IN_MM
+    global ROTARY_LETTERS
+    global HOLDER_LENGTH_MM
+    global HOLDER_RADIUS_MM
+    global CHECK_LIMITS
+    global CHECK_COLLISIONS
+    global INTERPOLATE
+    global MAX_STEP_MM
+    global MAX_TURN_DEGREES
+    global START_CRITERION
 
     try:
         args = parser.parse_args(shlex.split(argstring))
@@ -264,6 +361,25 @@ def processArguments(argstring):
             TCP_CANCEL = args.tcp_cancel
         if args.vector_precision is not None:
             VECTOR_PRECISION = int(args.vector_precision)
+        MACHINE = args.machine
+        if args.machine_unit:
+            MACHINE_UNIT_IN_MM = {"m": 1000.0, "mm": 1.0}[args.machine_unit.lower()]
+        ROTARY_LETTERS = args.rotary_letters.upper() if args.rotary_letters else None
+        if ROTARY_LETTERS is not None and (len(ROTARY_LETTERS) != 2
+                                           or any(c not in "ABC" for c in ROTARY_LETTERS)):
+            raise ValueError("--rotary-letters takes two of A, B and C, such as AC")
+        if args.holder_length is not None:
+            HOLDER_LENGTH_MM = float(args.holder_length)
+        if args.holder_radius is not None:
+            HOLDER_RADIUS_MM = float(args.holder_radius)
+        CHECK_LIMITS = not args.no_limits
+        CHECK_COLLISIONS = not args.no_collisions
+        INTERPOLATE = not args.no_interpolation
+        MAX_STEP_MM = float(args.max_step) if args.max_step is not None else None
+        MAX_TURN_DEGREES = float(args.max_turn) if args.max_turn is not None else None
+        START_CRITERION = args.start.upper() if args.start else None
+        if START_CRITERION is not None and START_CRITERION not in ("MIN", "MAX", "MIN_ABS", "SHORTEST"):
+            raise ValueError("--start is MIN, MAX, MIN_ABS or SHORTEST")
         if args.no_header:
             OUTPUT_HEADER = False
         else:
@@ -333,6 +449,7 @@ def export(objectslist, filename, argstring):
     global UNIT_SPEED_FORMAT
     global HORIZRAPID
     global VERTRAPID
+    global USE_TLO
 
     for obj in objectslist:
         if not hasattr(obj, "Path"):
@@ -340,6 +457,17 @@ def export(objectslist, filename, argstring):
                 "the object " + obj.Name + " is not a path. Please select only path and Compounds."
             )
             return None
+
+    machine = None
+    if MACHINE:
+        try:
+            machine = Machine(MACHINE)
+        except Exception as problem:
+            FreeCAD.Console.PrintError("fanuc_tcp_kin5ax: the machine cannot be used: %s\n" % problem)
+            return None
+        # the length of the tool is in the model the solver is given, so the joint values it answers
+        # with already allow for it: a tool length offset on top would apply it twice
+        USE_TLO = False
 
     # print("postprocessing...")  # Commented to reduce test noise
     gcode = ""
@@ -428,6 +556,23 @@ def export(objectslist, filename, argstring):
             gcode += linenumber() + "M8" + "\n"
         if coolantMode == "Mist":
             gcode += linenumber() + "M7" + "\n"
+
+        # with a machine, every move of an operation is solved and written as the five axes
+        if machine is not None and hasMoves(obj):
+            try:
+                gcode += machine.parse(obj)
+            except Exception as problem:
+                FreeCAD.Console.PrintError("fanuc_tcp_kin5ax: %s: %s\n" % (obj.Label, problem))
+                return None
+            if OUTPUT_COMMENTS:
+                gcode += linenumber() + "(FINISH OPERATION: %s)\n" % obj.Label.upper()
+            for line in POST_OPERATION.splitlines(True):
+                gcode += linenumber() + line
+            if not coolantMode == "None":
+                if OUTPUT_COMMENTS:
+                    gcode += linenumber() + "(COOLANT OFF:" + coolantMode.upper() + ")\n"
+                gcode += linenumber() + "M9" + "\n"
+            continue
 
         # switch tool centre point control on for an operation that commands the tool axis: in
         # G43.5 the control is told where the tip of the tool goes and which way the tool points,
@@ -525,6 +670,293 @@ def toolLengthOffsetNumber(pathobj):
     if number:
         return int(number)
     return None
+
+
+def hasMoves(pathobj):
+    """Whether this object moves the tool at all: a tool controller or a fixture does not."""
+    if not hasattr(pathobj, "Path") or pathobj.Path is None:
+        return False
+    for command in pathobj.Path.Commands:
+        if command.Name in LINEAR_COMMANDS or command.Name in ARC_COMMANDS:
+            return True
+        if command.Name.startswith("G8") or command.Name.startswith("G7"):
+            return True
+    return False
+
+
+def formatLength(value_mm):
+    """A length in mm as the post writes lengths: in the units of the output, to its precision."""
+    pos = Units.Quantity(value_mm, FreeCAD.Units.Length)
+    return format(float(pos.getValueAs(UNIT_FORMAT)), "." + str(PRECISION) + "f")
+
+
+def noNegativeZero(text):
+    """A -0.000 is a 0.000: the sign of a rounding error is nothing to write down."""
+    if text.startswith("-") and float(text) == 0.0:
+        return text[1:]
+    return text
+
+
+def formatFeed(value):
+    speed = Units.Quantity(value, FreeCAD.Units.Velocity)
+    return format(float(speed.getValueAs(UNIT_SPEED_FORMAT)), "." + str(PRECISION) + "f")
+
+
+class Machine(object):
+    """A machine of kin5ax, and the solving of an operation's moves for it.
+
+    Opened once per export, with the chain file and the settings the arguments
+    asked for. parse() takes an operation and gives back its G-code, the moves
+    as joint values; the tool is made from the tool controller of the operation
+    each time, since operations have tools of their own.
+    """
+
+    def __init__(self, chain_file):
+        from kin5axcam import kin5ax
+
+        self.kin5ax = kin5ax
+        self.chain = kin5ax.Chain(chain_file)
+        if not self.chain.is_5c():
+            raise ValueError("%s is not a five-axis chain of three linear and two rotary joints"
+                             % chain_file)
+        self.scale = MACHINE_UNIT_IN_MM          # mm per unit of the chain file
+        self.axes = self.chain.default_gcode_axes()
+        self.letters = self.rotaryLetters()
+        self.settings = self.makeSettings()
+        self.links = self.chain.links()
+
+    def rotaryLetters(self):
+        """What the control calls the two rotary axes: the argument, the names of the links, the guess."""
+        if ROTARY_LETTERS:
+            return ROTARY_LETTERS[0], ROTARY_LETTERS[1]
+        links = self.chain.links()
+        letters = []
+        for index in (self.axes.angle1, self.axes.angle2):
+            name = links[index].name.strip().upper()
+            letters.append(name if name in ("A", "B", "C") else None)
+        if None in letters or letters[0] == letters[1]:
+            return self.axes.angle1_letter, self.axes.angle2_letter
+        return letters[0], letters[1]
+
+    def makeSettings(self):
+        kin5ax = self.kin5ax
+        settings = kin5ax.Settings.default()
+        settings.check_limits = 1 if CHECK_LIMITS else 0
+        settings.check_collisions = 1 if CHECK_COLLISIONS else 0
+        settings.interpolate = 1 if INTERPOLATE else 0
+        if MAX_STEP_MM is not None:
+            settings.max_position_difference = MAX_STEP_MM / self.scale
+        if MAX_TURN_DEGREES is not None:
+            settings.max_orientation_difference_degrees = MAX_TURN_DEGREES
+        if START_CRITERION is not None:
+            settings.start_criterion = {
+                "MIN": kin5ax.START_MIN, "MAX": kin5ax.START_MAX,
+                "MIN_ABS": kin5ax.START_MIN_ABS, "SHORTEST": kin5ax.START_SHORTEST_PATH,
+            }[START_CRITERION]
+        return settings
+
+    def makeTool(self, pathobj):
+        """The tool of the operation as kin5ax sees it, or None when the operation has none.
+
+        A ball nose bit is a ball of half its diameter, programmed at the centre
+        of the ball; anything else is a flat end of half its diameter, programmed
+        at the tip. The shank is taken as wide as the cutter, which flags a
+        collision sooner rather than later. The holder is what the arguments say,
+        a tool bit not describing one.
+        """
+        kin5ax = self.kin5ax
+        controller = getattr(pathobj, "ToolController", None)
+        tool = getattr(controller, "Tool", None)
+        if tool is None:
+            return None
+        diameter = float(getattr(getattr(tool, "Diameter", 0.0), "Value", getattr(tool, "Diameter", 0.0)))
+        if diameter <= 0.0:
+            return None
+        shape = str(getattr(tool, "ShapeType", "") or getattr(tool, "ShapeName", "")).lower()
+        cutting = float(getattr(getattr(tool, "CuttingEdgeHeight", 0.0), "Value",
+                                getattr(tool, "CuttingEdgeHeight", 0.0)))
+        length = float(getattr(getattr(tool, "Length", 0.0), "Value", getattr(tool, "Length", 0.0)))
+        if cutting <= 0.0:
+            cutting = 2.0 * diameter
+        shank = max(length - cutting, 0.0)
+        radius = 0.5 * diameter / self.scale
+        kind = kin5ax.TOOL_BALL_NOSE if shape in ("ballend", "ballnose", "taperedballnose") \
+            else kin5ax.TOOL_FLAT_END
+        return kin5ax.Tool(kind, radius, radius, cutting / self.scale, shank / self.scale,
+                           HOLDER_LENGTH_MM / self.scale, HOLDER_RADIUS_MM / self.scale)
+
+    def collect(self, pathobj):
+        """The moves of the operation as locations for the solver, and everything else as it is.
+
+        A list of entries in the order of the path: ("move", command, point_mm,
+        axis, feed) for G0 and G1, ("other", command) for the rest. The point is
+        the tip of the tool, carried forward word by word the way a control
+        carries it; the axis is the last I J K seen, which is the tool standing up
+        until a move says otherwise. The first moves, before all three of X, Y
+        and Z have been given, are folded into the first move that has them: a
+        machine cannot be sent to a point it has not been told the whole of.
+        """
+        entries = []
+        current = {}
+        axis = VERTICAL
+        pending = None
+        for command in PathUtils.getPathWithPlacement(pathobj).Commands:
+            name = command.Name
+            if name in ARC_COMMANDS or name.startswith("G8") or name.startswith("G7"):
+                raise ValueError("%s is a %s, which the solver does not take: an arc has to be "
+                                 "written as lines and a cycle as moves before it can be solved"
+                                 % (pathobj.Label, name))
+            if name not in LINEAR_COMMANDS:
+                entries.append(("other", command))
+                continue
+            parameters = command.Parameters
+            for word in ("X", "Y", "Z"):
+                if word in parameters:
+                    current[word] = float(parameters[word])
+            if all(word in parameters for word in ("I", "J", "K")):
+                axis = (float(parameters["I"]), float(parameters["J"]), float(parameters["K"]))
+            feed = float(parameters["F"]) if "F" in parameters else None
+            if not all(word in current for word in ("X", "Y", "Z")):
+                pending = (name, feed)
+                continue
+            if pending is not None:
+                name = pending[0] if pending[0] in RAPID_COMMANDS else name
+                pending = None
+            entries.append(("move", name, (current["X"], current["Y"], current["Z"]), axis, feed))
+        return entries
+
+    def parse(self, pathobj):
+        """The G-code of one operation: its moves solved for this machine."""
+        kin5ax = self.kin5ax
+        entries = self.collect(pathobj)
+        moves = [entry for entry in entries if entry[0] == "move"]
+        tool = self.makeTool(pathobj)
+        if tool is None and CHECK_COLLISIONS:
+            raise ValueError("%s has no tool to check collisions with: pick a tool controller, or "
+                             "post with --no-collisions" % pathobj.Label)
+
+        # the programmed point: the ball nose tool of kin5ax is programmed at the centre of its ball,
+        # one radius up the axis from the tip the path carries
+        positions, vectors = [], []
+        for _, _, point, axis, _ in moves:
+            lift = tool.r if (tool is not None and tool.shape == kin5ax.TOOL_BALL_NOSE) else 0.0
+            positions.append(tuple(point[i] / self.scale + lift * axis[i] for i in range(3)))
+            vectors.append(axis)
+        path = self.chain.postprocess_locations(positions, vectors, self.settings, tool)
+
+        # the solved locations, back in the order of the path: a location of the file is its move,
+        # one invented on the way to the next belongs to that next move
+        solved = {}
+        unsolved = []
+        for location in path.locations():
+            index = location.file_location - 1
+            if location.origin != kin5ax.FROM_FILE:
+                index = min(index + 1, len(moves) - 1)
+            solved.setdefault(index, []).append(location)
+            if not location.has_solution:
+                unsolved.append((index, location))
+        report = path.report()
+        position_error, orientation_error = path.errors()
+        path.close()
+        if tool is not None:
+            tool.close()
+
+        out = ""
+        if OUTPUT_COMMENTS:
+            out += linenumber() + "(SOLVED FOR %s BY KIN5AX %s: AXES %s %s, TOOL LENGTH IN THE MODEL)\n" % (
+                self.chain.name().upper(), kin5ax.version(), self.letters[0], self.letters[1])
+        last = {}
+        lastcommand = None
+        lastfeed = None
+        move_index = -1
+        for entry in entries:
+            if entry[0] == "other":
+                command = entry[1]
+                if command.Name.startswith("(") and not OUTPUT_COMMENTS:
+                    continue
+                words = [command.Name] + ["%s%s" % (k, v) for k, v in command.Parameters.items()]
+                out += linenumber() + COMMAND_SPACE.join(words).upper() + "\n"
+                continue
+            move_index += 1
+            _, name, point, axis, feed = entry
+            for location in solved.get(move_index, []):
+                if not location.has_solution:
+                    if OUTPUT_COMMENTS:
+                        out += linenumber() + "(UNSOLVED: %s AT X%s Y%s Z%s)\n" % (
+                            location.status_name.upper(), formatLength(point[0]),
+                            formatLength(point[1]), formatLength(point[2]))
+                    continue
+                words = []
+                if not (MODAL and name == lastcommand):
+                    words.append(name)
+                for letter, index, scale, unlimited in self.axisWords():
+                    value = location.q[index] * scale
+                    if unlimited:
+                        value = self.nearestTurn(value, last.get(letter))
+                    text = noNegativeZero(formatLength(value) if letter in "XYZ"
+                                          else format(value, "." + str(PRECISION) + "f"))
+                    #the same word as the line before is left out, the comparison being made on
+                    #what would be written: a solution differs from the last by 1E-16 and means it
+                    if OUTPUT_DOUBLES or last.get(letter) != text:
+                        words.append(letter + text)
+                        last[letter] = text
+                if feed and name not in RAPID_COMMANDS and (feed != lastfeed or OUTPUT_DOUBLES):
+                    words.append("F" + formatFeed(feed))
+                    lastfeed = feed
+                if words:
+                    out += linenumber() + COMMAND_SPACE.join(words).upper() + "\n"
+                lastcommand = name
+        if OUTPUT_COMMENTS:
+            out += linenumber() + "(KIN5AX: %s; LARGEST ERRORS %.3g MM AND %.3g)\n" % (
+                ", ".join("%d %s" % (count, status.upper()) for status, count in sorted(report.items())),
+                position_error * self.scale, orientation_error)
+        if unsolved:
+            FreeCAD.Console.PrintWarning(
+                "fanuc_tcp_kin5ax: %s: %d of %d locations have no solution on %s - %s\n" % (
+                    pathobj.Label, len(unsolved), sum(len(v) for v in solved.values()),
+                    self.chain.name(), ", ".join("%d %s" % (count, status)
+                                                 for status, count in sorted(report.items()))))
+        return out
+
+    def axisWords(self):
+        """The words of a solved line in the order the post writes them: X Y Z, then the rotary letters.
+
+        Each is (letter, index into q, factor from the joint value to the word,
+        whether the axis turns without limits): mm per unit of the file for a
+        length, degrees per radian for an angle.
+        """
+        degrees = 180.0 / math.pi
+        rotary = []
+        for letter, index in ((self.letters[0], self.axes.angle1), (self.letters[1], self.axes.angle2)):
+            rotary.append((letter, index, degrees, not self.links[index].constrained))
+        rotary.sort(key=lambda w: w[0])
+        return [("X", self.axes.x, self.scale, False), ("Y", self.axes.y, self.scale, False),
+                ("Z", self.axes.z, self.scale, False)] + rotary
+
+    @staticmethod
+    def nearestTurn(degrees, previous):
+        """The equivalent of an angle nearest the one written before, for an axis that turns freely.
+
+        The solver hands back one representative of a class of equivalents - 90
+        and -270 are the same position of a rotary table - and may hand back a
+        different one for the next location. Written as they come, the two are a
+        full turn apart and the control turns the table through it. An axis
+        without limits is the same axis a turn on, so the nearest is written.
+        """
+        if previous is None:
+            return degrees
+        try:
+            previous = float(previous)
+        except (TypeError, ValueError):
+            return degrees
+        while degrees - previous > 180.0:
+            degrees -= 360.0
+        while previous - degrees > 180.0:
+            degrees += 360.0
+        return degrees
+
+    def close(self):
+        self.chain.close()
 
 
 def linenumber():

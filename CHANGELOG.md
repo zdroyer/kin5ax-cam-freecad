@@ -39,7 +39,9 @@ this is the point at which it became one of its own.
   voxel faces, a reset, and an option to cut at a location the machine cannot reach as well.
 - The cut also runs **with no machine at all**, straight along the path in the frame of the part.
 - **Machine models** for fourteen chains under `Resources/machines/`, including the SHW UniForce
-  7000, the Reiden RX10 and the Mazak VTC-800/30SR.
+  7000, the Reiden RX10 and the Mazak VTC-800/30SR. The file dialog of the machine command opens on
+  them, so there is something to put in the document on the day the addon is installed, and on
+  wherever a machine was last taken from once that is somewhere else.
 - **The kin5ax shared library** for Windows and Linux under `lib/`, so that the addon works as
   installed.
 

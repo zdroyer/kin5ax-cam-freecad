@@ -164,10 +164,10 @@ class Settings(ctypes.Structure):
     ]
 
     @classmethod
-    def default(cls, library=None):
+    def default(cls, library_path=None):
         """The settings the library recommends: both checks on, interpolation on, start closest to zero."""
         settings = cls()
-        load(library).k5_settings_default(ctypes.byref(settings))
+        load(library_path).k5_settings_default(ctypes.byref(settings))
         return settings
 
 
@@ -354,17 +354,23 @@ _library = None
 _loaded_from = None
 
 
-def load(path=None):
-    """The library, loaded once and kept. path names the file to load instead of searching for it."""
+def load(library_path=None):
+    """The library, loaded once and kept.
+
+    library_path names the shared library to load instead of searching for it,
+    and is a path: every public call here that takes one takes a path, never an
+    already-loaded library. Call this once if you have a particular file in
+    mind, and the calls after it with no argument use what it loaded.
+    """
     global _library, _loaded_from
-    if _library is not None and path is None:
+    if _library is not None and library_path is None:
         return _library
     tried = []
     where = None
-    if path is not None:
-        tried.append(path)
-        library = _load_file(path)
-        where = path
+    if library_path is not None:
+        tried.append(library_path)
+        library = _load_file(library_path)
+        where = library_path
     else:
         library = None
         for candidate in library_candidates():
@@ -548,24 +554,24 @@ def _declare(lib):
     lib.k5_path_write_gcode.argtypes = [_path_t, ctypes.POINTER(GcodeAxes), ctypes.c_char_p]
 
 
-def last_error(library=None):
+def last_error(library_path=None):
     """The message of the last call that failed on this thread; empty when none did."""
-    return (load(library).k5_last_error() or b"").decode("utf-8", "replace")
+    return (load(library_path).k5_last_error() or b"").decode("utf-8", "replace")
 
 
-def version(library=None):
+def version(library_path=None):
     """The version of the loaded library, as it states it: "0.1.0"."""
-    return load(library).k5_version_string().decode("ascii")
+    return load(library_path).k5_version_string().decode("ascii")
 
 
-def version_numbers(library=None):
+def version_numbers(library_path=None):
     """The same as three integers, which is what a comparison wants."""
-    return _version_numbers(load(library))
+    return _version_numbers(load(library_path))
 
 
-def loaded_from(library=None):
+def loaded_from(library_path=None):
     """The file the library was loaded from, for a report or a bug of someone else's making."""
-    load(library)
+    load(library_path)
     return _loaded_from
 
 
@@ -600,8 +606,8 @@ class Tool(object):
     """
 
     def __init__(self, shape, rz, r, cutting_height, shank_length, holder_length, holder_radius,
-                 library=None):
-        self._lib = load(library)
+                 library_path=None):
+        self._lib = load(library_path)
         self._handle = _tool_t()
         _check(self._lib, self._lib.k5_tool_create(
             int(shape), float(rz), float(r), float(cutting_height), float(shank_length),
@@ -753,8 +759,8 @@ class Path(object):
 class Chain(object):
     """A machine, read from a .kc (XML) or .kc.json file."""
 
-    def __init__(self, file_path, library=None):
-        self._lib = load(library)
+    def __init__(self, file_path, library_path=None):
+        self._lib = load(library_path)
         self._handle = _chain_t()
         self.file_path = file_path
         _check(self._lib, self._lib.k5_chain_open(_encode_path(file_path), ctypes.byref(self._handle)),
@@ -961,8 +967,8 @@ class Material(object):
     of the path has to be as dense as the voxels for a cut to look like one.
     """
 
-    def __init__(self, size, voxel, start, library=None):
-        self._lib = load(library)
+    def __init__(self, size, voxel, start, library_path=None):
+        self._lib = load(library_path)
         self._handle = _material_t()
         size = _doubles(size, 3, "size")
         start = _doubles(start, 3, "start")
@@ -1077,8 +1083,8 @@ class Simulation(object):
     and the tool's position are changed by every step.
     """
 
-    def __init__(self, chain, tool, path, material, library=None):
-        self._lib = load(library)
+    def __init__(self, chain, tool, path, material, library_path=None):
+        self._lib = load(library_path)
         self._handle = _simulation_t()
         self.chain, self.tool, self.path, self.material = chain, tool, path, material
         if chain is not None:
@@ -1087,7 +1093,7 @@ class Simulation(object):
                 "k5_simulation_create")
 
     @classmethod
-    def from_locations(cls, tool, settings, positions, axes, material, library=None):
+    def from_locations(cls, tool, settings, positions, axes, material, library_path=None):
         """A simulation with no chain: positions and axes are sequences of 3-sequences, in the unit of the material.
 
         The path is made dense by the library - interpolate, max_position_difference
@@ -1102,7 +1108,7 @@ class Simulation(object):
         count = len(positions)
         flat_positions = _doubles([c for p in positions for c in p], 3 * count, "positions")
         flat_axes = _doubles([c for a in axes for c in a], 3 * count, "axes")
-        simulation = cls(None, tool, None, material, library)
+        simulation = cls(None, tool, None, material, library_path)
         _check(simulation._lib, simulation._lib.k5_simulation_create_from_locations(
             tool.handle, ctypes.byref(settings), flat_positions if count else None,
             flat_axes if count else None, count, material.handle, ctypes.byref(simulation._handle)),

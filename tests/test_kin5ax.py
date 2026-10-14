@@ -225,6 +225,14 @@ class AMachine(unittest.TestCase):
                 self.assertTrue(location.has_solution)
                 self.assertEqual(kin5ax.AXES, len(location.q))
             self.assertEqual(seen[-1].q, path.last_configuration())
+            #and every record says what it was solved for: a third of a step on from the one before
+            for index, location in enumerate(seen):
+                self.assertAlmostEqual(p[0] + 0.025 * index / 3.0, location.position[0], delta=1e-9,
+                                       msg="record %d" % index)
+                self.assertAlmostEqual(p[1], location.position[1], delta=1e-9)
+                self.assertAlmostEqual(p[2], location.position[2], delta=1e-9)
+                for k in range(3):
+                    self.assertAlmostEqual(v[k], location.axis[k], delta=1e-6)
 
     def test_a_path_says_which_solids_met_and_at_how_many_locations(self):
         """The model of the spherical wrist meets itself when the tool leans far: the pair and the

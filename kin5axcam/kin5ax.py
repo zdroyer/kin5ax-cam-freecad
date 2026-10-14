@@ -179,6 +179,8 @@ class Location(ctypes.Structure):
         ("file_line", ctypes.c_size_t),
         ("_has_solution", ctypes.c_int),
         ("_q", ctypes.c_double * AXES),
+        ("_position", ctypes.c_double * 3),
+        ("_axis", ctypes.c_double * 3),
     ]
 
     @property
@@ -189,6 +191,17 @@ class Location(ctypes.Structure):
     def q(self):
         """The joint values chosen for this location, in the order of Chain.links(), or None."""
         return tuple(self._q) if self._has_solution else None
+
+    @property
+    def position(self):
+        """The programmed point of the tool this location was solved for: the cutter location's own,
+        or one invented on the way to it. Known whether or not the location has a solution."""
+        return tuple(self._position)
+
+    @property
+    def axis(self):
+        """The tool axis this location was solved for, in the same way."""
+        return tuple(self._axis)
 
     @property
     def status_name(self):

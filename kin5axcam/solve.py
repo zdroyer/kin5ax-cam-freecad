@@ -9,7 +9,8 @@ same way:
 - ``tool_of`` makes the tool of the operation as kin5ax sees it, from the tool
   bit of its controller and the holder the options describe;
 - ``solve`` hands the moves to the solver and brings the answer back in the
-  order of the path, one step per location, the invented ones included.
+  order of the path, one step per location, the invented ones included, with
+  the solids of the machine that met on the way and at how many locations.
 
 Lengths in a document are millimetres and lengths in a chain file are whatever
 the file's are (metres for the machines shipped with kin5ax), so an ``Options``
@@ -257,11 +258,14 @@ class Step(object):
 class Trajectory(object):
     """What solving the moves of an operation gave: a step per location, and the report of the run."""
 
-    def __init__(self, steps, report, position_error_mm, orientation_error, path=None, tool=None):
+    def __init__(self, steps, report, position_error_mm, orientation_error, path=None, tool=None,
+                 collisions=()):
         self.steps = steps
         self.report = report                    #{status name: count}, the statuses nobody got left out
         self.position_error_mm = position_error_mm
         self.orientation_error = orientation_error
+        #the pairs of solids that met, most locations first; empty when nothing did
+        self.collisions = list(collisions)
         #the path and the tool of the library, kept when the caller asked for them - a cutting
         #simulation needs both alive - and the caller's to close; None otherwise
         self.path = path
@@ -285,6 +289,15 @@ class Trajectory(object):
         return "%s; largest errors %.3g mm and %.3g" % (
             ", ".join("%d %s" % (count, status) for status, count in sorted(self.report.items())),
             self.position_error_mm, self.orientation_error)
+
+    def describe_collisions(self):
+        """A line per pair of solids that met: what met what, and at how many locations.
+
+        What a user can act on - the machine cannot tilt that far, the part sits
+        too close to that arm - where "every configuration collides" leaves them
+        nowhere.
+        """
+        return [pair.describe() for pair in self.collisions]
 
 
 def solve(chain, moves, tool_model, options, keep=False):
@@ -317,6 +330,7 @@ def solve(chain, moves, tool_model, options, keep=False):
             steps.append(Step(location.q, location.status, location.origin, moves[index]))
         report = path.report()
         position_error, orientation_error = path.errors()
+        collisions = path.collisions()
     except Exception:
         if path is not None:
             path.close()
@@ -328,7 +342,8 @@ def solve(chain, moves, tool_model, options, keep=False):
         if tool is not None:
             tool.close()
         path = tool = None
-    return Trajectory(steps, report, position_error * scale, orientation_error, path, tool)
+    return Trajectory(steps, report, position_error * scale, orientation_error, path, tool,
+                      collisions)
 
 
 def rotary_letters(chain, options):

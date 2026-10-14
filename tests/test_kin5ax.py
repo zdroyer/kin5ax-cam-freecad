@@ -226,6 +226,36 @@ class AMachine(unittest.TestCase):
                 self.assertEqual(kin5ax.AXES, len(location.q))
             self.assertEqual(seen[-1].q, path.last_configuration())
 
+    def test_a_path_says_which_solids_met_and_at_how_many_locations(self):
+        """The model of the spherical wrist meets itself when the tool leans far: the pair and the
+        count are what a user can act on, where "it collides" leaves them nowhere."""
+        wrist = os.path.join(CHAINS, "3CWithSphericalWrist_withBaseBox.kc")
+        if not os.path.isfile(wrist):
+            self.skipTest("no spherical wrist model in the test set")
+        settings = kin5ax.Settings.default()
+        settings.interpolate = 0
+        positions = [(0.02 * i - 0.1, 0.0, 0.1) for i in range(12)]
+        axes = [(math.sin(math.radians(8.0 * i)), 0.0, math.cos(math.radians(8.0 * i))) for i in range(12)]
+        with kin5ax.Chain(wrist) as chain:
+            with chain.postprocess_locations(positions, axes, settings, self.tool) as path:
+                colliding = path.count_of_status(kin5ax.COLLISION)
+                self.assertGreater(colliding, 0, "the far end of that path has to collide")
+                pairs = path.collisions()
+                self.assertGreater(len(pairs), 0, "and the path says which solids")
+                self.assertEqual(sorted((p.locations for p in pairs), reverse=True),
+                                 [p.locations for p in pairs], "most locations first")
+                for pair in pairs:
+                    self.assertNotEqual("", pair.first)
+                    self.assertNotEqual(pair.first, pair.second)
+                    self.assertLessEqual(pair.locations, colliding)
+                    self.assertIn(pair.kind, kin5ax.COLLIDING_KIND_NAMES)
+                    self.assertIn(pair.first, pair.describe())
+                self.assertEqual(colliding, pairs[0].locations,
+                                 "the pair that rejected every colliding location costs all of them")
+            settings.check_collisions = 0
+            with chain.postprocess_locations(positions, axes, settings, self.tool) as path:
+                self.assertEqual([], path.collisions(), "nothing checked, nothing reported")
+
     def test_the_solution_of_the_last_location_is_where_the_machine_is_left(self):
         """Not necessarily the configuration the point was taken from: a point has two, and the
         trajectory picks the one its start criterion says. It puts the tool at the point either way."""

@@ -247,7 +247,12 @@ written there. Its `Step` is the picture: the machine takes that configuration, 
 step's operation hangs from the mount by the length of its assembly (the bit's own solid, or a
 cylinder when it has none), the model and the stock of the job sit in the frame of the material
 through links, and a location the machine cannot reach is a **red vertex** where its tip would have
-been. The report of the solve is a property too.
+been. The report of the solve is a property too, and when the machine met itself on the way, so is
+**what met what**: `Collisions` holds a line per pair of solids with the number of locations it cost
+— *C and Tool holder: 331 locations*, *the tool cuts into Material holder: 25 locations* — and the
+same lines are in the report under *what met*. A pair is counted once per location however many of
+its configurations it rejected. That is the difference between knowing a path collides and knowing
+the machine cannot tilt that far.
 
 **The player** is the task panel the simulate command opens: a slider over the locations, play and
 pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
@@ -447,7 +452,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-134 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+143 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

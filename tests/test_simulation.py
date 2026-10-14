@@ -212,6 +212,46 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertGreater((FreeCAD.Vector(self.machine.ToolMount.Placement.Base) - first).Length, 0.1)
         self.assertEqual(self.simulation.StepCount // 2, self.simulation.Step)
 
+    def test_a_simulation_saved_before_a_property_existed_gains_it_on_restore(self):
+        """A document of an older version is restored without the properties added since; an object
+        that then runs the current code would read and write names that are not there."""
+        sim = self.simulation
+        self.assertIn("Collisions", sim.PropertiesList)
+        sim.removeProperty("Collisions")
+        sim.removeProperty("VoxelSize")
+        self.assertNotIn("Collisions", sim.PropertiesList)
+        sim.Proxy.onDocumentRestored(sim)
+        self.assertIn("Collisions", sim.PropertiesList)
+        self.assertEqual(0.0, sim.VoxelSize.Value, "and the default of the one that has one")
+        self.document.recompute()
+        self.assertNotIn("Invalid", sim.State, sim.Report)
+
+    def test_what_met_what_is_in_the_report_when_the_machine_collides(self):
+        """A machine whose wrist cannot tilt as far as the path asks: the pairs and their counts are
+        in the Collisions property and in the report the dialog shows."""
+        wrist = os.path.join(CHAINS, "3CWithSphericalWrist_withBaseBox.kc")
+        if not os.path.isfile(wrist):
+            self.skipTest("no spherical wrist model in the test set")
+        from kin5axcam import machine
+
+        sim = self.simulation
+        sim.Machine = machine.Create("Wrist", wrist, 1000.0, self.document)
+        self.operation.LeanAngle = 60.0                 #far more than that wrist can tilt
+        self.document.recompute()
+        self.assertFalse(all(sim.Solved), "something has to collide for this to say anything")
+        self.assertGreater(len(sim.Collisions), 0, sim.Report)
+        for line in sim.Collisions:
+            self.assertIn(": ", line, "the operation, then what met what")
+            self.assertRegex(line, r"\d+ location")
+            self.assertIn(line, sim.Report)
+        self.assertIn("what met:", sim.Report)
+
+        #and with the check off, nothing is reported
+        sim.CheckCollisions = False
+        self.document.recompute()
+        self.assertEqual([], list(sim.Collisions))
+        self.assertNotIn("what met:", sim.Report)
+
     def test_a_part_the_machine_cannot_reach_is_marked_where_its_tip_would_be(self):
         self.box.Placement.Base = FreeCAD.Vector(5000.0, 0.0, 0.0)
         self.document.recompute()

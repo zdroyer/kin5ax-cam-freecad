@@ -63,6 +63,17 @@ SOLVE_STATUS_NAMES = {
     SINGULAR_UNSOLVED: "a location of a singular section the interpolated angle did not solve",
 }
 
+#k5_collision_kind: how two solids met, which is what is read between the names of a pair
+COLLIDING_PARTS = 0
+COLLIDING_TOOL = 1
+COLLIDING_TOOL_SHANK = 2
+
+COLLIDING_KIND_NAMES = {
+    COLLIDING_PARTS: "and",
+    COLLIDING_TOOL: "cuts into",
+    COLLIDING_TOOL_SHANK: "is in",
+}
+
 #k5_location_origin: where a location of a solved path came from
 FROM_FILE = 0
 INTERPOLATED = 1
@@ -186,6 +197,34 @@ class Location(ctypes.Structure):
     def __repr__(self):
         return "Location(%s, origin %d, from %d, q=%r)" % (self.status_name, self.origin,
                                                            self.file_location, self.q)
+
+
+class Collision(ctypes.Structure):
+    """k5_collision: two solids of the machine that met, and at how many locations of a path."""
+
+    _fields_ = [
+        ("_first", ctypes.c_char * NAME_MAX),
+        ("_second", ctypes.c_char * NAME_MAX),
+        ("kind", ctypes.c_int),
+        ("locations", ctypes.c_size_t),
+    ]
+
+    @property
+    def first(self):
+        return self._first.decode("utf-8", "replace")
+
+    @property
+    def second(self):
+        return self._second.decode("utf-8", "replace")
+
+    def describe(self):
+        """"Z box 1 and Tool holder: 313 locations"."""
+        return "%s %s %s: %d location%s" % (
+            self.first, COLLIDING_KIND_NAMES.get(self.kind, "and"), self.second, self.locations,
+            "" if self.locations == 1 else "s")
+
+    def __repr__(self):
+        return "Collision(%r)" % self.describe()
 
 
 class GcodeAxes(ctypes.Structure):
@@ -364,6 +403,10 @@ def _declare(lib):
     lib.k5_path_count_of_status.argtypes = [_path_t, ctypes.c_int, _size_p]
     lib.k5_path_count_of_origin.restype = ctypes.c_int
     lib.k5_path_count_of_origin.argtypes = [_path_t, ctypes.c_int, _size_p]
+    lib.k5_path_collision_count.restype = ctypes.c_int
+    lib.k5_path_collision_count.argtypes = [_path_t, _size_p]
+    lib.k5_path_collision.restype = ctypes.c_int
+    lib.k5_path_collision.argtypes = [_path_t, ctypes.c_size_t, ctypes.POINTER(Collision)]
     lib.k5_path_errors.restype = ctypes.c_int
     lib.k5_path_errors.argtypes = [_path_t, _double_p, _double_p]
     lib.k5_path_last_configuration.restype = ctypes.c_int
@@ -542,6 +585,25 @@ class Path(object):
             if count:
                 counts[name] = count
         return counts
+
+    def collisions(self):
+        """Which solids of the machine met, and at how many locations of this path each pair did.
+
+        A list of Collision, most locations first; empty when the collision
+        check was off or nothing met. A location whose every configuration was
+        rejected by the same pair counts once.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_path_collision_count(self._handle, ctypes.byref(count)),
+               "k5_path_collision_count")
+        pairs = []
+        for index in range(count.value):
+            pair = Collision()
+            _check(self._lib, self._lib.k5_path_collision(self._handle, index, ctypes.byref(pair)),
+                   "k5_path_collision")
+            pairs.append(pair)
+        pairs.sort(key=lambda p: p.locations, reverse=True)
+        return pairs
 
     def errors(self):
         """The biggest position error and the biggest tool-axis error of the solutions of this run."""

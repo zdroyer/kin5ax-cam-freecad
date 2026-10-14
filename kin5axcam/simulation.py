@@ -46,99 +46,99 @@ def _quantity(value):
 
 class ObjectSimulation(object):
 
-    def __init__(self, obj, machine_object, job):
-        obj.Proxy = self
-        obj.addProperty("App::PropertyLink", "Machine", PROPERTY_GROUP,
-                        "The machine the job runs on; none, and the path is played as it is, the tool "
-                        "leaning in the frame of the part")
-        obj.addProperty("App::PropertyLink", "Job", PROPERTY_GROUP, "The job whose operations are run")
-        obj.addProperty("App::PropertyLinkList", "Operations", PROPERTY_GROUP,
-                        "The operations run, in this order; none means every active operation of the job")
-        obj.addProperty("App::PropertyLength", "HolderLength", PROPERTY_GROUP,
-                        "The holder between the tool and the spindle, which a tool bit does not describe")
-        obj.addProperty("App::PropertyLength", "HolderRadius", PROPERTY_GROUP, "And its radius")
-        obj.addProperty("App::PropertyBool", "CheckLimits", PROPERTY_GROUP,
-                        "A configuration outside the joint limits is no solution")
-        obj.addProperty("App::PropertyBool", "CheckCollisions", PROPERTY_GROUP,
-                        "A configuration whose parts meet is no solution")
-        obj.addProperty("App::PropertyBool", "Interpolate", PROPERTY_GROUP,
-                        "Invent locations between two moves, as dense as the two bounds below")
-        obj.addProperty("App::PropertyLength", "MaxStep", PROPERTY_GROUP,
-                        "No invented step longer than this; 0 leaves it to kin5ax")
-        obj.addProperty("App::PropertyAngle", "MaxTurn", PROPERTY_GROUP,
-                        "Nor turning the tool axis further than this; 0 leaves it to kin5ax")
-        obj.addProperty("App::PropertyEnumeration", "Start", PROPERTY_GROUP,
-                        "Where the trajectory starts: the first rotary axis closest to zero, at its "
-                        "minimum, at its maximum, or wherever makes the whole path shortest")
-        obj.Start = START_CHOICES
+    #what a simulation carries: what it is told to do, what the solve gave, and what it put in the
+    #document. Everything read or written by this class is here, so that an object restored from an
+    #older document gains whatever it is missing - see kin5axcam.machine.ensure.
+    PROPERTIES = (
+        ("App::PropertyLink", "Machine",
+         "The machine the job runs on; none, and the path is played as it is, the tool leaning in the "
+         "frame of the part", None),
+        ("App::PropertyLink", "Job", "The job whose operations are run", None),
+        ("App::PropertyLinkList", "Operations",
+         "The operations run, in this order; none means every active operation of the job", None),
+        ("App::PropertyLength", "HolderLength",
+         "The holder between the tool and the spindle, which a tool bit does not describe", 50.0),
+        ("App::PropertyLength", "HolderRadius", "And its radius", 30.0),
+        ("App::PropertyBool", "CheckLimits",
+         "A configuration outside the joint limits is no solution", True),
+        ("App::PropertyBool", "CheckCollisions",
+         "A configuration whose parts meet is no solution", True),
+        ("App::PropertyBool", "Interpolate",
+         "Invent locations between two moves, as dense as the two bounds below", True),
+        ("App::PropertyLength", "MaxStep",
+         "No invented step longer than this; 0 leaves it to kin5ax", 0.0),
+        ("App::PropertyAngle", "MaxTurn",
+         "Nor turning the tool axis further than this; 0 leaves it to kin5ax", 0.0),
+        ("App::PropertyEnumeration", "Start",
+         "Where the trajectory starts: the first rotary axis closest to zero, at its minimum, at its "
+         "maximum, or wherever makes the whole path shortest", START_CHOICES),
+        ("App::PropertyBool", "Cut",
+         "Cut the stock of the job as the machine goes, and show what is left", True),
+        ("App::PropertyLength", "VoxelSize",
+         "The side of a voxel of the stock; 0 picks one from the size of the stock", 0.0),
+        ("App::PropertyInteger", "RefreshEvery",
+         "How many cut steps between two redraws of what is left of the stock", 5),
 
-        obj.addProperty("App::PropertyInteger", "Step", PROPERTY_GROUP,
-                        "The location of the trajectory the machine is shown at")
-        obj.addProperty("App::PropertyInteger", "StepCount", PROPERTY_GROUP,
-                        "How many locations the trajectory has")
-        obj.addProperty("App::PropertyFloatList", "Joints", PROPERTY_GROUP,
-                        "Five joint values per location, in the order of the links of the chain")
-        obj.addProperty("App::PropertyIntegerList", "Solved", PROPERTY_GROUP,
-                        "1 for a location with a solution, 0 for one without")
-        obj.addProperty("App::PropertyIntegerList", "Statuses", PROPERTY_GROUP,
-                        "The status of kin5ax for every location")
-        obj.addProperty("App::PropertyFloatList", "Tips", PROPERTY_GROUP,
-                        "Where the tip of the tool was asked to be, three values per location, mm")
-        obj.addProperty("App::PropertyFloatList", "Axes", PROPERTY_GROUP,
-                        "Which way the tool was asked to point, three values per location")
-        obj.addProperty("App::PropertyLink", "ToolFrame", PROPERTY_GROUP,
-                        "Without a machine: the part the tool hangs from, placed at every location")
-        obj.addProperty("App::PropertyLink", "PartFrame", PROPERTY_GROUP,
-                        "Without a machine: the part holding what is left of the stock and the markers")
-        obj.addProperty("App::PropertyIntegerList", "StepOperations", PROPERTY_GROUP,
-                        "The index into Operations of the operation every location belongs to")
-        obj.addProperty("App::PropertyString", "Report", PROPERTY_GROUP,
-                        "What came of the solve: the counts by status and the largest errors")
+        ("App::PropertyInteger", "Step",
+         "The location of the trajectory the machine is shown at", 0),
+        ("App::PropertyInteger", "StepCount", "How many locations the trajectory has", None),
+        ("App::PropertyFloatList", "Joints",
+         "Five joint values per location, in the order of the links of the chain", None),
+        ("App::PropertyIntegerList", "Solved",
+         "1 for a location with a solution, 0 for one without", None),
+        ("App::PropertyIntegerList", "Statuses", "The status of kin5ax for every location", None),
+        ("App::PropertyFloatList", "Tips",
+         "Where the tip of the tool was asked to be, three values per location, mm", None),
+        ("App::PropertyFloatList", "Axes",
+         "Which way the tool was asked to point, three values per location", None),
+        ("App::PropertyIntegerList", "StepOperations",
+         "The index into Operations of the operation every location belongs to", None),
+        ("App::PropertyString", "Report",
+         "What came of the solve: the counts by status and the largest errors", None),
+        ("App::PropertyStringList", "Collisions",
+         "Which solids of the machine met on the way, and at how many locations each pair did", None),
+        ("App::PropertyFloat", "RemovedVolume",
+         "The volume cut off the stock so far, in cubic millimetres", None),
+        ("App::PropertyInteger", "Gouges",
+         "How many locations so far had the shank or the holder in material still there", None),
+        ("App::PropertyVector", "FirstGouge",
+         "Where the first of them was, in the frame of the part", None),
+
         #global links: these live inside parts of the machine or of this object, and a link into a
         #part from outside it is out of scope for an ordinary one
-        obj.addProperty("App::PropertyLinkGlobal", "Tool", PROPERTY_GROUP, "The tool shown at the tool mount")
-        obj.addProperty("App::PropertyLinkGlobal", "Holder", PROPERTY_GROUP, "The holder shown above it")
-        obj.addProperty("App::PropertyLinkListGlobal", "Workpiece", PROPERTY_GROUP,
-                        "The links to the model and the stock of the job, in the frame of the material")
-        obj.addProperty("App::PropertyLinkGlobal", "Unreachable", PROPERTY_GROUP,
-                        "The markers of the locations the machine cannot reach")
+        ("App::PropertyLinkGlobal", "Tool", "The tool shown at the tool mount", None),
+        ("App::PropertyLinkGlobal", "Holder", "The holder shown above it", None),
+        ("App::PropertyLinkListGlobal", "Workpiece",
+         "The links to the model and the stock of the job, in the frame of the material", None),
+        ("App::PropertyLinkGlobal", "Unreachable",
+         "The markers of the locations the machine cannot reach", None),
+        ("App::PropertyLinkGlobal", "Surface",
+         "What is left of the stock, as a mesh of the exposed faces of its voxels", None),
+        ("App::PropertyLinkGlobal", "GougeMarker", "The marker of the first gouge", None),
+        ("App::PropertyLink", "ToolFrame",
+         "Without a machine: the part the tool hangs from, placed at every location", None),
+        ("App::PropertyLink", "PartFrame",
+         "Without a machine: the part holding what is left of the stock and the markers", None),
+    )
 
-        obj.addProperty("App::PropertyBool", "Cut", PROPERTY_GROUP,
-                        "Cut the stock of the job as the machine goes, and show what is left")
-        obj.addProperty("App::PropertyLength", "VoxelSize", PROPERTY_GROUP,
-                        "The side of a voxel of the stock; 0 picks one from the size of the stock")
-        obj.addProperty("App::PropertyInteger", "RefreshEvery", PROPERTY_GROUP,
-                        "How many cut steps between two redraws of what is left of the stock")
-        obj.addProperty("App::PropertyFloat", "RemovedVolume", PROPERTY_GROUP,
-                        "The volume cut off the stock so far, in cubic millimetres")
-        obj.addProperty("App::PropertyInteger", "Gouges", PROPERTY_GROUP,
-                        "How many locations so far had the shank or the holder in material still there")
-        obj.addProperty("App::PropertyVector", "FirstGouge", PROPERTY_GROUP,
-                        "Where the first of them was, in the frame of the part")
-        obj.addProperty("App::PropertyLinkGlobal", "Surface", PROPERTY_GROUP,
-                        "What is left of the stock, as a mesh of the exposed faces of its voxels")
-        obj.addProperty("App::PropertyLinkGlobal", "GougeMarker", PROPERTY_GROUP,
-                        "The marker of the first gouge")
-        for name in ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
-                     "Report", "Tool", "Holder", "Workpiece", "Unreachable", "RemovedVolume", "Gouges",
-                     "FirstGouge", "Surface", "GougeMarker", "ToolFrame", "PartFrame"):
-            obj.setEditorMode(name, 1)
-        obj.Cut = True
-        obj.VoxelSize = 0.0
-        obj.RefreshEvery = 5
+    #what the solve and the picture fill in, which nobody edits by hand
+    READ_ONLY = ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
+                 "Report", "Collisions", "RemovedVolume", "Gouges", "FirstGouge", "Tool", "Holder",
+                 "Workpiece", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
 
+    def __init__(self, obj, machine_object, job):
+        obj.Proxy = self
+        self.ensureProperties(obj)
         obj.Machine = machine_object
         obj.Job = job
-        obj.HolderLength = 50.0
-        obj.HolderRadius = 30.0
-        obj.CheckLimits = True
-        obj.CheckCollisions = True
-        obj.Interpolate = True
-        obj.MaxStep = 0.0
-        obj.MaxTurn = 0.0
-        obj.Start = "MIN_ABS"
-        obj.Step = 0
         self.forget()
+
+    def ensureProperties(self, obj):
+        """Whatever of PROPERTIES the object has not got, with its default; the read-only ones hidden."""
+        added = machine.ensure(obj, self.PROPERTIES)
+        for name in self.READ_ONLY:
+            obj.setEditorMode(name, 1)
+        return added
 
     def forget(self):
         """The state that lives only while the document is open: nothing of it is pickled."""
@@ -249,6 +249,7 @@ class ObjectSimulation(object):
         self.forgetCut()
         joints, solved, statuses, tips, axes, operations_of_steps = [], [], [], [], [], []
         reports = []
+        collisions = []
         runs = []
         for index, operation in enumerate(self.operations(obj)):
             moves = solve.moves_of(operation)
@@ -267,6 +268,8 @@ class ObjectSimulation(object):
                     operations_of_steps.append(index)
                 runs.append((first, len(solved), trajectory))
                 reports.append("%s: %s" % (operation.Label, trajectory.describe()))
+                for line in trajectory.describe_collisions():
+                    collisions.append("%s: %s" % (operation.Label, line))
             else:
                 #no machine: the path is the trajectory, made dense by the library, every location of
                 #it reachable by definition
@@ -288,6 +291,10 @@ class ObjectSimulation(object):
         obj.Axes = axes
         obj.StepOperations = operations_of_steps
         obj.StepCount = len(solved)
+        obj.Collisions = collisions
+        if collisions:
+            reports.append("what met:")
+            reports.extend("    " + line for line in collisions)
         obj.Report = "\n".join(reports) if reports else "nothing to run"
         self.placeWorkpiece(obj)
         self.markUnreachable(obj)
@@ -701,6 +708,7 @@ class ObjectSimulation(object):
 
     def onDocumentRestored(self, obj):
         self.forget()
+        self.ensureProperties(obj)
         machine.globalise(obj, {
             "Tool": "App::PropertyLinkGlobal", "Holder": "App::PropertyLinkGlobal",
             "Workpiece": "App::PropertyLinkListGlobal", "Unreachable": "App::PropertyLinkGlobal",

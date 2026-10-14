@@ -205,6 +205,22 @@ class AMachineInADocument(unittest.TestCase):
         for marker in self.machine.ToolJoints:
             self.assertNotIn("Touched", marker.State, marker.Name)
 
+    def test_a_machine_saved_before_the_joint_markers_gains_them_on_restore(self):
+        machine = self.machine
+        markers = list(machine.ToolJoints) + list(machine.MaterialJoints)
+        for marker in markers:
+            self.document.removeObject(marker.Name)
+        for name in ("ToolJoints", "MaterialJoints", "JointSize", "ShowJoints"):
+            machine.removeProperty(name)
+        machine.Proxy.onDocumentRestored(machine)
+        self.assertIn("ShowJoints", machine.PropertiesList)
+        self.assertGreater(machine.JointSize, 0.0)
+        self.assertEqual(len(markers), len(machine.ToolJoints) + len(machine.MaterialJoints),
+                         "a marker per joint again")
+        for index, marker in enumerate(machine.ToolJoints):
+            self.assertIn(marker, machine.ToolBodies[index].Group)
+            self.assertFalse(marker.Shape.isNull(), "and shaped to the joint it belongs to")
+
     def test_an_older_document_gets_its_links_made_global_on_restore(self):
         from kin5axcam import machine as module
 

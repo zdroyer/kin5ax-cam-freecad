@@ -188,6 +188,12 @@ class ToolModel(object):
             return tuple(tip)
         return tuple(tip[i] + self.radius_mm * axis[i] for i in range(3))
 
+    def tip_point(self, programmed, axis):
+        """Where the tip is for a programmed point there: the way back from programmed_point."""
+        if not self.ball_nosed:
+            return tuple(programmed)
+        return tuple(programmed[i] - self.radius_mm * axis[i] for i in range(3))
+
     def to_kin5ax(self, unit_in_mm):
         """The tool of the library, in the unit of the chain file."""
         radius = self.radius_mm / unit_in_mm
@@ -231,16 +237,22 @@ class Step(object):
     q is the configuration chosen, in the order of the links of the chain and in
     the units of the chain file, or None when the location has no solution.
     move is the Move this location belongs to: its own, or for a location the
-    solver invented, the move it is on the way to.
+    solver invented, the move it is on the way to. point and axis are where the
+    tip was asked to be and which way the tool was to point at this very
+    location, in mm: the move's own for a location of the path, and for an
+    invented one the point on the way the library solved - not the end of the
+    move, which is where the machine goes only at the last of them.
     """
 
-    __slots__ = ("q", "status", "origin", "move")
+    __slots__ = ("q", "status", "origin", "move", "point", "axis")
 
-    def __init__(self, q, status, origin, move):
+    def __init__(self, q, status, origin, move, point=None, axis=None):
         self.q = q
         self.status = status
         self.origin = origin
         self.move = move
+        self.point = tuple(move.point) if point is None else tuple(point)
+        self.axis = tuple(move.axis) if axis is None else tuple(axis)
 
     @property
     def solved(self):
@@ -327,7 +339,12 @@ def solve(chain, moves, tool_model, options, keep=False):
             index = location.file_location - 1
             if location.origin != kin5ax.FROM_FILE:
                 index = min(index + 1, len(moves) - 1)
-            steps.append(Step(location.q, location.status, location.origin, moves[index]))
+            #what the library solved, back in mm and at the tip: the move's own point for a location
+            #of the path, a point on the way for one invented between two
+            programmed = tuple(c * scale for c in location.position)
+            tip = tool_model.tip_point(programmed, location.axis) if tool_model else programmed
+            steps.append(Step(location.q, location.status, location.origin, moves[index], tip,
+                              location.axis))
         report = path.report()
         position_error, orientation_error = path.errors()
         collisions = path.collisions()

@@ -286,8 +286,10 @@ class ObjectSimulation(object):
                     joints.extend(step.q if step.solved else [0.0] * kin5ax.AXES)
                     solved.append(1 if step.solved else 0)
                     statuses.append(step.status)
-                    tips.extend(step.move.point)
-                    axes.extend(step.move.axis)
+                    #the location itself, invented or not - not the end of the move it is on the
+                    #way to, which left every step of a long move standing at its end
+                    tips.extend(step.point)
+                    axes.extend(step.axis)
                     operations_of_steps.append(index)
                 runs.append((first, len(solved), trajectory))
                 reports.append("%s: %s" % (operation.Label, trajectory.describe()))
@@ -750,7 +752,7 @@ class ObjectSimulation(object):
             obj.CollidedEver = remembered
             #the pairs are what a reader wants; what is painted is the single solids they are made of
             machine_object.Proxy.highlight(machine_object, solids, remembered)
-            self.paintTool(obj, solids, remembered)
+            self.paintTool(obj, solids)
         return configuration
 
     def collisionAt(self, obj, step):
@@ -799,21 +801,20 @@ class ObjectSimulation(object):
                     solids.append(name)
         return configuration, [pair.describe().rsplit(":", 1)[0] for pair in met], solids
 
-    def paintTool(self, obj, solids, remembered=()):
-        """The tool and its holder painted as the machine's solids are: red now, orange once met.
+    def paintTool(self, obj, solids):
+        """The tool and its holder red while they meet something, their own colours otherwise.
 
         The two are named by the library as "the tool" and "the shank or the
         holder"; the holder of the picture is painted for either, since it is
-        drawn as one piece with the shank.
+        drawn as one piece with the shank. Unlike a solid of the machine, the
+        tool is not left orange afterwards: it is the thing that moves, not a
+        part that was in the way.
         """
         named = set(solids or ())
-        before = set(remembered or ())
 
         def colour_of(words, normal):
             if any(word in named for word in words):
                 return machine.COLLIDING
-            if any(word in before for word in words):
-                return machine.COLLIDED_BEFORE
             return normal
 
         for owned, normal, words in (

@@ -443,6 +443,44 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertAlmostEqual(sim.Proxy.voxelSize(sim), options.max_step_mm, delta=1e-12)
         self.assertGreater(sim.StepCount, 100, "many more locations than the operation's moves")
 
+    def test_an_invented_step_is_on_the_way_and_not_at_the_end_of_its_move(self):
+        """Every location of the trajectory is where the tool was asked to be at that location: a
+        move's own point for one of the path, a point between two moves for one invented by the
+        library. The tips used to carry the end of the move for every step of it, so the machine
+        stood still through a long move and then jumped, and a stamp at an unreached location went
+        to the wrong place."""
+        from kin5axcam import solve
+
+        sim = self.simulation
+        options = sim.Proxy.options(sim)
+        chain = self.machine.Proxy.chain(self.machine)
+        moves = solve.moves_of(self.operation)
+        model = solve.tool_model_of(self.operation, options)
+        trajectory = solve.solve(chain, moves, model, options)
+        longest = max(options.max_step_mm, 1e-3)
+        invented = 0
+        for before, step in zip(trajectory.steps, trajectory.steps[1:]):
+            apart = sum((step.point[k] - before.point[k]) ** 2 for k in range(3)) ** 0.5
+            self.assertLessEqual(apart, longest + 1e-6, "no step longer than the limit")
+            if step.origin == kin5ax.INTERPOLATED:
+                invented += 1
+                #on the way to the move - or, in a turn in place, at its point with the axis still
+                #turning towards its axis
+                short_of_it = sum((step.point[k] - step.move.point[k]) ** 2 for k in range(3))
+                still_turning = sum((step.axis[k] - step.move.axis[k]) ** 2 for k in range(3))
+                self.assertGreater(short_of_it + still_turning, 1e-12,
+                                   "neither at the end of the move nor turning towards it")
+            elif step.origin == kin5ax.FROM_FILE:
+                for k in range(3):
+                    self.assertAlmostEqual(step.move.point[k], step.point[k], delta=1e-6)
+                    self.assertAlmostEqual(step.move.axis[k], step.axis[k], delta=1e-6)
+        self.assertGreater(invented, 0)
+        #and the properties carry the same: nothing jumps further than a step
+        tips = sim.Tips
+        for i in range(1, sim.StepCount):
+            apart = sum((tips[3 * i + k] - tips[3 * i - 3 + k]) ** 2 for k in range(3)) ** 0.5
+            self.assertLessEqual(apart, longest + 1e-6, "location %d" % i)
+
     def test_switching_the_cut_off_takes_the_cloud_away(self):
         sim = self.simulation
         sim.Cut = False

@@ -259,8 +259,10 @@ over: the machine is posed at a configuration that puts the tool where that loca
 collision check off, the configuration nearest the pose before it, which is the one it would have
 swung into — and the two solids that meet there are painted **red**, the tool and its holder with
 them. `Collided` names the pairs for that location and the player says *what meets here*. Stepping to
-a location that solves takes the red off, but a solid that has met anything stays **orange** to the
-end of the run (`CollidedEver`), so what a path has cost is still visible once the tool has moved on.
+a location that solves takes the red off, but a solid of the machine that has met anything stays
+**orange** to the end of the run (`CollidedEver`), so what a path has cost is still visible once the
+tool has moved on. The tool itself is never orange: it is the thing that moves, not a part that was
+in the way.
 
 The stock is cut at such a location as well, since the tool was asked to be there and what it would
 have taken off is worth seeing beside the collision — the cutting simulation of the library will not
@@ -306,7 +308,11 @@ gouge is an orange marker, and the player shows both under the slider.
 Three things to know about it. The library stamps the tool into the voxels **once per location
 with nothing swept between two**, so when cutting the simulation makes the invented steps as dense
 as the voxels (`MaxStep` left at 0) — many more locations than the operation has moves, and the
-reason a cut looks like a cut. **Stepping backwards starts the cut again** from a whole block, since
+reason a cut looks like a cut. Every location of the trajectory, invented or not, carries **its own
+point and axis** (`Tips`, `Axes`): the library records what each one was solved for, and the addon
+takes it from there rather than from the move the location is on the way to — which is what puts the
+machine, the red vertex and the stamp at an unreached location where that location is, and not at
+the end of its move. **Stepping backwards starts the cut again** from a whole block, since
 voxels cannot be uncut; scrubbing the slider back is a recut up to there, which is fast at these
 sizes. And the cut needs the solved paths of the library, which live only while the document is
 open: a reopened document still scrubs the machine, but **recompute the simulation to cut again**.
@@ -469,7 +475,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-148 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+149 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

@@ -1,8 +1,13 @@
-# kin5axcam — 3D Surface (5axis) for the CAM workbench of FreeCAD
+# kin5axcam — five-axis milling for the CAM workbench of FreeCAD
 
 A new operation in FreeCAD's CAM workbench: a zigzag over the parameter space of **one face**, cut
 with **any shape of tool**. It is the toolpath source for the five-axis postprocessor of
-[kin5ax](../kin5ax/). How the tool is held is the `ToolAxis` property:
+[kin5ax](https://github.com/zdroyer/kin5ax), whose solver this addon also uses to put the machine
+itself in the document, play the job on it, and cut the stock away as the tool passes. The
+kinematics are C++ and ship here as a built library under [`lib/`](lib/); this repository is the
+FreeCAD half.
+
+How the tool is held is the `ToolAxis` property:
 
 | `ToolAxis` | the tool axis | writes |
 |---|---|---|
@@ -208,8 +213,16 @@ collision sooner rather than later.
 `kin5axcam/kin5ax.py` is a `ctypes` binding to `kin5axc`, the C interface of the library — a chain,
 a tool, the settings, a path solved in memory and read back location by location, the frames of the
 machine for drawing it. No FreeCAD in it; it is usable from any Python. The shared library is looked
-for at the path in `KIN5AXC_LIBRARY`, in `kin5axcam/lib/`, and in the build trees of a checkout,
-in that order; the error of a failed load lists every place it tried.
+for at the path in `KIN5AXC_LIBRARY`, in [`lib/`](lib/) of this addon, and in the build
+trees of a checkout of the library kept beside this one, in that order; the error of a
+failed load lists every place it tried.
+
+**The version is checked** as the library is loaded. The two halves are released together
+and `lib/` carries the matching build, but a developer can point `KIN5AXC_LIBRARY` at
+another one, and the binding mirrors the C structures field by field: a library of a
+different version read through it would not raise an error, it would read a structure at
+the wrong offsets. `REQUIRED_VERSION` is what this addon was written against and anything
+else is refused by name. While the major number is 0 the minor has to match exactly.
 
 Lengths cross that boundary **in the unit of the chain file**, which the file does not state and
 which is metres for every machine shipped with kin5ax. The post scales by `--machine-unit`; anything
@@ -323,6 +336,10 @@ which is what a finish pass is judged by.
 
 ## Installing it
 
+**The Addon Manager** is the ordinary way: *Tools → Addon Manager*, and this repository under its
+own name. Everything needed comes with it, the compiled kinematics included, so there is nothing to
+build. What follows is for installing a checkout by hand, which is what a developer wants.
+
 **Ask FreeCAD where its `Mod` folder is rather than guessing.** In the Python console:
 
 ```python
@@ -332,8 +349,8 @@ FreeCAD.getUserAppDataDir()
 Addons go in `Mod` under whatever that prints. On FreeCAD 1.1 it prints a **versioned** folder:
 
 ```
-C:\Users\you\AppData\Roaming\FreeCAD\v1-1\        ->  ...\FreeCAD\v1-1\Mod\kin5axcam
-~/.local/share/FreeCAD/v1-1/                      ->  ~/.local/share/FreeCAD/v1-1/Mod/kin5axcam
+C:\Users\you\AppData\Roaming\FreeCAD\v1-1\        ->  ...\FreeCAD\v1-1\Mod\kin5ax-cam-freecad
+~/.local/share/FreeCAD/v1-1/                      ->  ~/.local/share/FreeCAD/v1-1/Mod/kin5ax-cam-freecad
 ```
 
 Older FreeCADs used `%APPDATA%\FreeCAD\Mod` with no version in it, and that is the trap: an addon
@@ -345,13 +362,13 @@ and an edit needs no second step. Windows, no administrator needed:
 
 ```powershell
 $mod = Join-Path $env:APPDATA "FreeCAD\v1-1\Mod"
-New-Item -ItemType Junction -Path (Join-Path $mod "kin5axcam") -Target "C:\path\to\inkin5ax\kin5axcam"
+New-Item -ItemType Junction -Path (Join-Path $mod "kin5ax-cam-freecad") -Target "C:\path\to\kin5ax-cam-freecad"
 ```
 
 Linux:
 
 ```sh
-ln -s ~/path/to/inkin5ax/kin5axcam ~/.local/share/FreeCAD/v1-1/Mod/kin5axcam
+ln -s ~/path/to/kin5ax-cam-freecad ~/.local/share/FreeCAD/v1-1/Mod/kin5ax-cam-freecad
 ```
 
 Restart FreeCAD and switch to the **CAM** workbench, which is when the command registers. To check it
@@ -396,7 +413,7 @@ appearing, the task panel, the tool library.
 With FreeCAD open, in the Python console (**View -> Panels -> Python console**):
 
 ```python
-import sys; ROOT = r"C:\Users\zdroyer\dev\C++\inkin5ax\kin5axcam"
+import sys; ROOT = r"C:\Users\zdroyer\dev\C++\kin5ax-cam-freecad"
 sys.path.insert(0, ROOT)
 exec(open(ROOT + r"\examples\make_test_job.py").read())
 build("box")            # a flat top face
@@ -475,22 +492,24 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-149 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+152 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks
 against a real sphere, a real plane and a real trimmed face, and then builds a Job, a tool and an
 operation and reads the commands that come out. `tests/test_post.py` posts a leaning path through
 the postprocessor and reads the G-code back, word by word — with a vector, and solved for the
-trunnion table of the library's test set, where the forward kinematics of the library is the
+trunnion table of `Resources/machines/`, where the forward kinematics of the library is the
 oracle: the joint values of the last line, put back into the chain, have to give the ball centre of
 the last move. `tests/test_kin5ax.py` checks the binding against the same oracle, and
 `tests/test_machine.py` and `tests/test_simulation.py` close the loop over the document: at the
 last step the tool hanging from the mount part puts its ball centre, in the frame of the material
 part, where the last move asked — and the stock has less volume after the path than before it, the
 same amount whether a step is reached forwards or after going back — on a machine and without one.
-Without FreeCAD fifty-seven are skipped and the other sixty-nine still run; the ones that need the
-shared library skip when it is not built.
+Without FreeCAD seventy-seven are skipped and the other seventy-five still run, which is what
+the GitHub workflow does on every push: it loads the library shipped in `lib/` on a machine
+that did not build it, checks the version it answers with, and runs those. The tests that need
+FreeCAD are run by hand until there is an AppImage in the workflow.
 
 ## Where things are
 
@@ -509,8 +528,10 @@ shared library skip when it is not built.
 | `kin5axcam/machine_gui.py` | the two commands and the player |
 | `post/fanuc_tcp_kin5ax_post.py` | the postprocessor: the whole vector with TCP, or the five axes solved by kin5ax |
 | `kin5axcam/postinstall.py` | copies that file where FreeCAD looks for postprocessors |
+| `lib/` | the kin5ax shared library for Windows and Linux, so an installed addon needs no compiler |
+| `Resources/machines/` | fourteen machine models to open as a machine, the real ones among them |
 | `tests/` | the three parts of the test suite |
 | `examples/make_test_job.py` | builds a job, a ball end tool and an operation to look at |
 
 The operation depends on nothing of kin5ax: a toolpath knows no machine. kin5ax enters at the
-postprocessor, which is the next thing to build.
+postprocessor and at the machine simulation, both of which call the binding.

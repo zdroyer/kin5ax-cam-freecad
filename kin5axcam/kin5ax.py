@@ -319,22 +319,33 @@ def library_file_name():
     return "libkin5axc.so"
 
 
+def addon_directory():
+    """The folder of the addon itself, with the real path resolved.
+
+    Inside FreeCAD the addon may be reached through a junction or a symbolic
+    link from the Mod folder, and what is shipped beside it sits next to where
+    the files really are, not next to the link.
+    """
+    return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
 def library_candidates():
     """Where the shared library is looked for, in order. Only the first that exists is loaded."""
     name = library_file_name()
-    #the real path: the addon may be reached through a junction from FreeCAD's Mod folder, and the
-    #build trees sit next to where the files really are
-    here = os.path.dirname(os.path.realpath(__file__))
-    addon = os.path.dirname(here)
-    repository = os.path.dirname(addon)
+    addon = addon_directory()
     candidates = []
     if os.environ.get("KIN5AXC_LIBRARY"):
         candidates.append(os.environ["KIN5AXC_LIBRARY"])
+    #what the addon ships, which is what an installed copy uses
     candidates.append(os.path.join(addon, "lib", name))
-    #the build trees of a checkout, for development: MSVC puts the configuration in the path
-    for build in ("build", "build-win32", "build-linux"):
-        for configuration in ("Release", "RelWithDebInfo", "Debug", ""):
-            candidates.append(os.path.join(repository, build, "kin5axc", configuration, name))
+    #the build trees of a checkout of the library, for development: the library is a repository of
+    #its own and a developer keeps it beside this one. MSVC puts the configuration in the path.
+    beside = os.path.dirname(addon)
+    for checkout in ("kin5ax", "inkin5ax"):
+        for build in ("build", "build-win32", "build-linux"):
+            for configuration in ("Release", "RelWithDebInfo", "Debug", ""):
+                candidates.append(os.path.join(beside, checkout, build, "kin5axc", configuration,
+                                               name))
     candidates.append(os.path.join(os.path.expanduser("~"), "kin5ax-build", "kin5axc", name))
     return candidates
 

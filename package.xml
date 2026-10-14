@@ -2,25 +2,36 @@
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>kin5axcam</name>
   <description>
-    A 3D Surface (5axis) operation for the CAM workbench: a zigzag over the parameter space of one
-    face, cut with any shape of tool. The path carries the tip of the tool, worked out from the
-    roundness at the end of it. The tool stands up, or points along the surface normal leaned over
-    by two angles, and then every cutting move carries the axis of the tool as I, J and K - the
-    vector output the kin5ax postprocessor solves for.
+    Five-axis milling for the CAM workbench. A 3D Surface (5axis) operation lays a zigzag over the
+    parameter space of one face, cut with any shape of tool, with the tool standing up or pointing
+    along the surface normal leaned over by two angles; every cutting move carries the axis of the
+    tool as I, J and K. A postprocessor writes that vector for a control with TCP, or hands the path
+    to the kin5ax solver and writes the five axes of a real machine. The machine itself can be put in
+    the document, read from a kinematic chain file, and the job played on it: every location solved,
+    the collisions named and shown, and the stock cut away as the tool passes.
   </description>
   <version>0.1.0</version>
-  <date>2026-10-12</date>
+  <date>2026-10-14</date>
   <maintainer email="zdroyer@gmail.com">Przemysław Zdroik</maintainer>
-  <license file="../LICENSE">MIT</license>
-  <url type="repository" branch="master">https://github.com/zdroyer/kin5ax</url>
-  <url type="readme">https://github.com/zdroyer/kin5ax/blob/master/kin5axcam/README.md</url>
+  <license file="LICENSE">MIT</license>
+  <url type="repository" branch="main">https://github.com/zdroyer/kin5ax-cam-freecad</url>
+  <url type="readme">https://github.com/zdroyer/kin5ax-cam-freecad/blob/main/README.md</url>
+  <url type="bugtracker">https://github.com/zdroyer/kin5ax-cam-freecad/issues</url>
+  <icon>Resources/icons/Surface5Axis.svg</icon>
   <freecadmin>1.0</freecadmin>
+  <tag>CAM</tag>
+  <tag>CNC</tag>
+  <tag>5-axis</tag>
+  <tag>postprocessor</tag>
+  <tag>simulation</tag>
   <content>
     <workbench>
       <classname>kin5axcam</classname>
       <subdirectory>./</subdirectory>
       <description>
-        Adds the command CAM_Surface5Axis to the CAM workbench. It is not a workbench of its own.
+        Adds the commands CAM_Surface5Axis, CAM_Kin5axMachine and CAM_Kin5axSimulate to the CAM
+        workbench. It is not a workbench of its own: there is nothing to select in the workbench
+        list, and the commands appear once CAM is open.
       </description>
       <icon>Resources/icons/Surface5Axis.svg</icon>
     </workbench>

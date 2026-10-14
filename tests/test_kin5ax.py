@@ -14,10 +14,10 @@ import unittest
 
 from kin5axcam import kin5ax
 
-#the real path: inside FreeCAD the addon is reached through a junction from the Mod folder, and the
-#test chains of the repository sit next to where the files really are
+#the real path: inside FreeCAD the addon may be reached through a junction from the Mod folder,
+#and the machine models it ships sit next to where the files really are
 HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-CHAINS = os.path.join(os.path.dirname(HERE), "kin5axTests", "TestChains")
+CHAINS = os.path.join(HERE, "Resources", "machines")
 #a trunnion table: A tilts, C turns the workpiece - the chain the ABI tests use
 CHAIN = os.path.join(CHAINS, "AC_TiltRotaryTable.kc")
 
@@ -72,7 +72,15 @@ class FindingTheLibrary(unittest.TestCase):
     def test_the_places_it_looks_are_listed_and_the_addon_lib_folder_is_one_of_them(self):
         candidates = kin5ax.library_candidates()
         self.assertGreater(len(candidates), 1)
-        self.assertTrue(any(os.path.join("kin5axcam", "lib") in c for c in candidates), candidates)
+        shipped = os.path.join(kin5ax.addon_directory(), "lib", kin5ax.library_file_name())
+        self.assertIn(shipped, candidates, candidates)
+
+    def test_the_addon_ships_the_library_it_needs(self):
+        """An installed addon compiles nothing, so the binary has to be in the repository. It is the
+        one the binding loads here, unless a developer has pointed KIN5AXC_LIBRARY elsewhere."""
+        shipped = os.path.join(kin5ax.addon_directory(), "lib", kin5ax.library_file_name())
+        self.assertTrue(os.path.isfile(shipped),
+                        "no %s in lib/, so an installed addon would find nothing" % shipped)
 
     def test_a_file_that_is_not_a_library_is_an_error_with_the_path_in_it(self):
         with self.assertRaises(kin5ax.Kin5axError) as caught:

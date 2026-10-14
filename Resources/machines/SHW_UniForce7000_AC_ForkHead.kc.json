@@ -1,0 +1,112 @@
+{
+  "format": "kin5ax-chain",
+  "version": 1,
+  "name": "SHW UniForce 7000, fork milling head, fixed clamping plate",
+  "machine": "SHW UniForce 7000",
+  "author": "Claude, from public catalogue data; the offsets are estimates",
+  "modified": "2026-09-23",
+  "tool_branch": {
+    "links": [
+      {
+        "type": "linear",
+        "name": "X",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [0.0, 1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -4.0,
+          "max": 4.0
+        }
+      },
+      {
+        "type": "linear",
+        "name": "Y",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [0.0, -1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -0.3,
+          "max": 2.8
+        }
+      },
+      {
+        "type": "linear",
+        "name": "Z",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [-1.0, 0.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -0.9,
+          "max": 0.9
+        }
+      },
+      {
+        "type": "rotary",
+        "name": "C",
+        "translation": [0.0, -0.7, 0.0],
+        "rotation": {
+          "axis": [1.0, 0.0, 0.0],
+          "angle_deg": 0.0
+        },
+        "limits": {
+          "min": -360.0,
+          "max": 360.0
+        }
+      },
+      {
+        "type": "rotary",
+        "name": "A",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [0.0, 1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -29.999999999999996,
+          "max": 90.0
+        }
+      }
+    ],
+    "tool": {
+      "name": "Tool holder",
+      "translation": [0.0, 0.652, 0.0],
+      "rotation": {
+        "axis": [0.57735026919, -0.57735026919, 0.57735026919],
+        "angle_deg": 120.0
+      },
+      "tool_holder": {
+        "length": 0.05,
+        "radius": 0.03
+      },
+      "boxes": [
+        {
+          "min": [-0.2, -0.2, 0.08],
+          "max": [0.2, 0.2, 0.7]
+        }
+      ]
+    }
+  },
+  "workpiece_branch": {
+    "links": [],
+    "workpiece_holder": {
+      "name": "Material holder",
+      "translation": [0.0, 0.0, 0.0],
+      "rotation": {
+        "axis": [0.0, 0.0, 1.0],
+        "angle_deg": 0.0
+      },
+      "boxes": [
+        {
+          "min": [-1.5, -0.8, -0.12],
+          "max": [1.5, 0.8, -0.02]
+        }
+      ]
+    }
+  }
+}

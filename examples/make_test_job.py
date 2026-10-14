@@ -6,7 +6,7 @@ numbers can be checked against the shape.
 
 From the Python console of FreeCAD, with the path of this addon:
 
-    import sys; ROOT = r"C:\\Users\\you\\dev\\inkin5ax\\kin5axcam"
+    import sys; ROOT = r"C:\\Users\\you\\dev\\kin5ax-cam-freecad"
     sys.path.insert(0, ROOT)
     exec(open(ROOT + r"\\examples\\make_test_job.py").read())
     build("box")                # a flat top face: every cutting move at one height

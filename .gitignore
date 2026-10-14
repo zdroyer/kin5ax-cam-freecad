@@ -1,0 +1,20 @@
+# Python caches. The addon is loaded by FreeCAD's interpreter, which writes these everywhere.
+__pycache__/
+*.py[cod]
+
+# FreeCAD leaves a backup beside every document it saves
+*.FCStd1
+*.FCBak
+
+# Documents made while trying the operation out by hand
+examples/*.FCStd
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Note what is NOT ignored: lib/ holds the built kin5axc shared library for Windows and Linux, and
+# that is deliberate - the addon is useless without it and an Addon Manager install cannot compile
+# anything. See lib/README.md.

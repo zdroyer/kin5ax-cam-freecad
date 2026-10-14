@@ -25,12 +25,12 @@ except ImportError:                                 # a plain Python: nothing he
 
 needs_freecad = unittest.skipIf(FreeCAD is None, "FreeCAD is not importable: run with freecadcmd")
 
-#the real path: inside FreeCAD the addon is reached through a junction from the Mod folder, and the
-#test chains of the repository sit next to where the files really are
+#the real path: inside FreeCAD the addon may be reached through a junction from the Mod folder,
+#and the machine models it ships sit next to where the files really are
 HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 POST_FILE = os.path.join(HERE, "post", "fanuc_tcp_kin5ax_post.py")
 #a trunnion table of the test set of the library: A tilts, C turns the workpiece, lengths in metres
-CHAIN = os.path.join(os.path.dirname(HERE), "kin5axTests", "TestChains", "AC_TiltRotaryTable.kc")
+CHAIN = os.path.join(HERE, "Resources", "machines", "AC_TiltRotaryTable.kc")
 
 
 def library_is_there():

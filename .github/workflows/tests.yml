@@ -1,0 +1,50 @@
+# The tests of the addon that need no FreeCAD, on a stock runner, plus a check that the shared
+# library shipped in lib/ loads there and says the version the binding expects.
+#
+# That second job is the point of this workflow. The addon ships a compiled library so that an Addon
+# Manager install works, and a binary built on one machine and never loaded on another is a promise
+# nobody has tested. Here it is loaded on a machine that is not the one that built it.
+#
+# The tests that need FreeCAD - the operation, the machine, the simulation - are skipped here and
+# run on the maintainer's machine. Running them would want a FreeCAD AppImage and is the next step.
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: the tests that need no FreeCAD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: The shipped library loads and says which version it is
+        run: |
+          python - <<'EOF'
+          import os, sys
+          sys.path.insert(0, os.getcwd())
+          from kin5axcam import kin5ax
+          print("loaded from", kin5ax.loaded_from())
+          print("version", kin5ax.version())
+          major, minor, _ = kin5ax.version_numbers()
+          if (major, minor) != kin5ax.REQUIRED_VERSION:
+              raise SystemExit("lib/ holds %s, the binding needs %d.%d"
+                               % (kin5ax.version(), *kin5ax.REQUIRED_VERSION))
+          EOF
+
+      - name: The suite
+        run: python run_tests.py

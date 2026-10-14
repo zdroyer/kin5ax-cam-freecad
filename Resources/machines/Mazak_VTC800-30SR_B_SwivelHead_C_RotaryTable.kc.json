@@ -1,0 +1,113 @@
+{
+  "format": "kin5ax-chain",
+  "version": 1,
+  "name": "Mazak VTC-800/30SR, B swivel head, C rotary table on the fixed table",
+  "machine": "Mazak VTC-800/30SR",
+  "author": "Claude, from public catalogue data; the offsets are estimates",
+  "modified": "2026-09-23",
+  "tool_branch": {
+    "links": [
+      {
+        "type": "linear",
+        "name": "X",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [0.0, 1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -1.5,
+          "max": 1.5
+        }
+      },
+      {
+        "type": "linear",
+        "name": "Y",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [-1.0, 0.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -0.4,
+          "max": 0.4
+        }
+      },
+      {
+        "type": "linear",
+        "name": "Z",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [0.0, -1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -0.36,
+          "max": 0.36
+        }
+      },
+      {
+        "type": "rotary",
+        "name": "B",
+        "translation": [0.0, 0.0, 0.4],
+        "rotation": {
+          "axis": [0.0, 1.0, 0.0],
+          "angle_deg": 90.0
+        },
+        "limits": {
+          "min": -110.0,
+          "max": 110.0
+        }
+      }
+    ],
+    "tool": {
+      "name": "Tool holder",
+      "translation": [0.352, 0.0, 0.0],
+      "rotation": {
+        "axis": [0.57735026919, -0.57735026919, -0.57735026919],
+        "angle_deg": 120.0
+      },
+      "tool_holder": {
+        "length": 0.05,
+        "radius": 0.03
+      },
+      "boxes": [
+        {
+          "min": [-0.12, -0.12, 0.08],
+          "max": [0.12, 0.12, 0.5]
+        }
+      ]
+    }
+  },
+  "workpiece_branch": {
+    "links": [
+      {
+        "type": "rotary",
+        "name": "C",
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": {
+          "axis": [1.0, 0.0, 0.0],
+          "angle_deg": 0.0
+        },
+        "limits": {
+          "min": -360.0,
+          "max": 360.0
+        }
+      }
+    ],
+    "workpiece_holder": {
+      "name": "Material holder",
+      "translation": [0.0, 0.0, 0.0],
+      "rotation": {
+        "axis": [0.0, 0.0, 1.0],
+        "angle_deg": 0.0
+      },
+      "boxes": [
+        {
+          "min": [-0.25, -0.25, -0.12],
+          "max": [0.25, 0.25, -0.02]
+        }
+      ]
+    }
+  }
+}

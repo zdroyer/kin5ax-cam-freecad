@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!DOCTYPE kinematic_chain [
+
+<!ELEMENT kinematic_chain (tool_part, material_holder_part)>
+<!ATTLIST kinematic_chain
+	name CDATA #IMPLIED
+>
+<!ELEMENT tool_part (segment+)>
+<!ELEMENT material_holder_part (segment+)>
+<!ELEMENT segment (initial_translation, initial_rotation, tool_holder?, box*)>
+<!ATTLIST segment
+	type CDATA #REQUIRED
+	name CDATA #REQUIRED
+	parameter_value_minimum CDATA #IMPLIED
+	parameter_value_maximum CDATA #IMPLIED
+>
+<!ELEMENT tool_holder EMPTY>
+<!ATTLIST tool_holder
+	length CDATA #REQUIRED
+	radius CDATA #REQUIRED
+>
+<!ELEMENT box EMPTY>
+<!ATTLIST box
+	x1 CDATA #REQUIRED
+	x2 CDATA #REQUIRED
+	y1 CDATA #REQUIRED
+	y2 CDATA #REQUIRED
+	z1 CDATA #REQUIRED
+	z2 CDATA #REQUIRED
+>
+<!ELEMENT initial_translation EMPTY>
+<!ATTLIST initial_translation
+	x CDATA #REQUIRED
+	y CDATA #REQUIRED
+	z CDATA #REQUIRED
+>
+<!ELEMENT initial_rotation EMPTY>
+<!ATTLIST initial_rotation
+	x CDATA #REQUIRED
+	y CDATA #REQUIRED
+	z CDATA #REQUIRED
+	alpha CDATA #REQUIRED
+>
+]>
+<!--
+  AB mill-turn, simplified after the Willemin-Macodel 508MT2. Units: metres (true scale, small machine:
+  real travels X/Y/Z = 0.400/0.200/0.385). World: X along the bar, Z up.
+  Tool side:  X, Y, Z, then swivel head B about world +Y (pivot 0.18 above the tool point), tool vertical
+              at B = 0, home tool point at (0,0,0.10). B = +90: tool horizontal, facing the bar end.
+  Work side:  A about world +X (the bar / dividing spindle). Holder frame = world orientation at A = 0,
+              origin on the A axis at the bar end face; the bar comes from -X.
+  B is limited to -45..+115 deg (manufacturer data), A is endless.
+  Linear travels from home: X -0.12..+0.28, Y -0.10..+0.10, Z -0.30..+0.085 (real stroke lengths;
+  where home sits inside each stroke is my choice, so that B = +90 can reach the bar end face).
+  Solids: headstock (fixed), collet nose (turns with A), B housing (moves with XYZ), spindle (swings with B).
+-->
+<kinematic_chain name="WM 508MT2 AB mill-turn" >
+<tool_part>
+<segment type="PRISMATIC_LINK" name="X" parameter_value_minimum="-0.12" parameter_value_maximum="0.28" >
+<initial_translation x="0" y="0.3" z="0.6"/>
+<initial_rotation x="0" y="1" z="0" alpha="90"/>
+</segment>
+<segment type="PRISMATIC_LINK" name="Y" parameter_value_minimum="-0.1" parameter_value_maximum="0.1" >
+<initial_translation x="0" y="0" z="0"/>
+<initial_rotation x="1" y="0" z="0" alpha="-90"/>
+</segment>
+<segment type="PRISMATIC_LINK" name="Z" parameter_value_minimum="-0.3" parameter_value_maximum="0.085" >
+<initial_translation x="0" y="0" z="-0.3"/>
+<initial_rotation x="0" y="1" z="0" alpha="-90"/>
+</segment>
+<segment type="REVOLUTE_LINK" name="B" parameter_value_minimum="-45" parameter_value_maximum="115" >
+<initial_translation x="0" y="0" z="-0.32"/>
+<initial_rotation x="0" y="1" z="0" alpha="90"/>
+<box x1="-0.08" x2="0.08" y1="-0.08" y2="0.08" z1="0.07" z2="0.25"  />
+</segment>
+<segment type="TOOL" name="Tool holder" >
+<initial_translation x="0.132" y="0" z="0"/>
+<initial_rotation x="0" y="1" z="0" alpha="-90"/>
+<box x1="-0.05" x2="0.05" y1="-0.05" y2="0.05" z1="0.05" z2="0.3"  />
+<tool_holder length="0.05" radius="0.03"/>
+</segment>
+</tool_part>
+<material_holder_part>
+<segment type="REVOLUTE_LINK" name="A" >
+<initial_translation x="-0.15" y="0" z="0"/>
+<initial_rotation x="0" y="1" z="0" alpha="90"/>
+<box x1="-0.1" x2="0.1" y1="-0.1" y2="0.1" z1="-0.3" z2="0.01"  />
+</segment>
+<segment type="MATERIAL_HOLDER" name="Material holder" >
+<initial_translation x="0" y="0" z="0.15"/>
+<initial_rotation x="0" y="1" z="0" alpha="-90"/>
+<box x1="-0.13" x2="-0.06" y1="-0.04" y2="0.04" z1="-0.04" z2="0.04"  />
+</segment>
+</material_holder_part>
+</kinematic_chain>

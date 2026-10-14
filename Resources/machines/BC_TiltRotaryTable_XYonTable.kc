@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<!DOCTYPE kinematic_chain [
+
+<!ELEMENT kinematic_chain (tool_part, material_holder_part)>
+<!ATTLIST kinematic_chain
+	name CDATA #IMPLIED
+>
+<!ELEMENT tool_part (segment+)>
+<!ELEMENT material_holder_part (segment+)>
+<!ELEMENT segment (initial_translation, initial_rotation, tool_holder?, box*)>
+<!ATTLIST segment
+	type CDATA #REQUIRED
+	name CDATA #REQUIRED
+	parameter_value_minimum CDATA #IMPLIED
+	parameter_value_maximum CDATA #IMPLIED
+>
+<!ELEMENT tool_holder EMPTY>
+<!ATTLIST tool_holder
+	length CDATA #REQUIRED
+	radius CDATA #REQUIRED
+>
+<!ELEMENT box EMPTY>
+<!ATTLIST box
+	x1 CDATA #REQUIRED
+	x2 CDATA #REQUIRED
+	y1 CDATA #REQUIRED
+	y2 CDATA #REQUIRED
+	z1 CDATA #REQUIRED
+	z2 CDATA #REQUIRED
+>
+<!ELEMENT initial_translation EMPTY>
+<!ATTLIST initial_translation
+	x CDATA #REQUIRED
+	y CDATA #REQUIRED
+	z CDATA #REQUIRED
+>
+<!ELEMENT initial_rotation EMPTY>
+<!ATTLIST initial_rotation
+	x CDATA #REQUIRED
+	y CDATA #REQUIRED
+	z CDATA #REQUIRED
+	alpha CDATA #REQUIRED
+>
+]>
+<!--
+  Variant of BC_TiltRotaryTable: C-frame VMC with an add-on BC table, X and Y on the TABLE side.
+  Units: metres. World: Z up, holder frame = world at home.
+  Tool side:  Z only, tool vertical, home tool point at (0,0,0.30).
+  Table side: Y (saddle), X (table), B about world +Y (0.08 below the table top), C about world +Z.
+  Purpose: exercises prismatic joints in the material holder part of the chain.
+  B is limited to -110..+110 deg. Linear travels from home: X -0.35..+0.35, Y -0.25..+0.25, Z -0.45..+0.20.
+  Solids: cradle (tilts with B), platter (turns with C), spindle head.
+-->
+<kinematic_chain name="BC tilt-rotary table, X and Y on the table side" >
+<tool_part>
+<segment type="PRISMATIC_LINK" name="Z" parameter_value_minimum="-0.45" parameter_value_maximum="0.2" >
+<initial_translation x="0" y="0.35" z="0.85"/>
+<initial_rotation x="1" y="0" z="0" alpha="0"/>
+</segment>
+<segment type="TOOL" name="Tool holder" >
+<initial_translation x="0" y="-0.35" z="-0.502"/>
+<initial_rotation x="1" y="0" z="0" alpha="0"/>
+<box x1="-0.07" x2="0.07" y1="-0.07" y2="0.07" z1="0.05" z2="0.45"  />
+<tool_holder length="0.05" radius="0.03"/>
+</segment>
+</tool_part>
+<material_holder_part>
+<segment type="PRISMATIC_LINK" name="Y" parameter_value_minimum="-0.25" parameter_value_maximum="0.25" >
+<initial_translation x="0" y="0" z="-0.3"/>
+<initial_rotation x="1" y="0" z="0" alpha="-90"/>
+</segment>
+<segment type="PRISMATIC_LINK" name="X" parameter_value_minimum="-0.35" parameter_value_maximum="0.35" >
+<initial_translation x="0" y="-0.05" z="0"/>
+<initial_rotation x="0" y="1" z="0" alpha="90"/>
+</segment>
+<segment type="REVOLUTE_LINK" name="B" parameter_value_minimum="-110" parameter_value_maximum="110" >
+<initial_translation x="0" y="-0.17" z="0"/>
+<initial_rotation x="0" y="1" z="0" alpha="-90"/>
+</segment>
+<segment type="REVOLUTE_LINK" name="C" >
+<initial_translation x="0" y="0" z="0"/>
+<initial_rotation x="1" y="0" z="0" alpha="90"/>
+<box x1="-0.2" x2="0.2" y1="-0.26" y2="0.26" z1="-0.1" z2="0.02"  />
+</segment>
+<segment type="MATERIAL_HOLDER" name="Material holder" >
+<initial_translation x="0" y="0" z="0.08"/>
+<initial_rotation x="1" y="0" z="0" alpha="0"/>
+<box x1="-0.16" x2="0.16" y1="-0.16" y2="0.16" z1="-0.05" z2="-0.02"  />
+</segment>
+</material_holder_part>
+</kinematic_chain>

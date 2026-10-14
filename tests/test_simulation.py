@@ -18,7 +18,7 @@ except ImportError:                                 # a plain Python: nothing he
 from kin5axcam import kin5ax
 
 HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-CHAINS = os.path.join(os.path.dirname(HERE), "kin5axTests", "TestChains")
+CHAINS = os.path.join(HERE, "Resources", "machines")
 CHAIN = os.path.join(CHAINS, "AC_TiltRotaryTable.kc")
 
 

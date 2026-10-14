@@ -1,0 +1,14 @@
+# The shipped libraries are binary: a line-ending conversion would corrupt them, and on Windows
+# git's autocrlf is on by default, so this is worth stating rather than relying on detection.
+lib/*.dll binary
+lib/*.so  binary
+lib/*.so.* binary
+lib/*.dylib binary
+
+# Everything else is text, normalised in the repository and checked out as the platform wants
+* text=auto
+
+# Machine models and icons are text with a format of their own
+*.kc   text
+*.json text
+*.svg  text

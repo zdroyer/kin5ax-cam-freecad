@@ -12,3 +12,6 @@ lib/*.dylib binary
 *.kc   text
 *.json text
 *.svg  text
+
+# the workflows are not part of an installed addon
+/.github export-ignore

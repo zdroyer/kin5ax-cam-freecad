@@ -1,0 +1,238 @@
+# Releases the addon: checks what is in the repository, tests it on both platforms, packages it the
+# way it is installed, and attaches that to a GitHub release.
+#
+# Started by hand only, from the Actions tab, with the tag to release. A release of this addon and a
+# release of kin5ax go together - the binding mirrors the C structures of the library field by field,
+# and lib/ carries the build it was tested against - so neither should happen because somebody pushed.
+#
+# What it refuses to release, and why each one would be worse found by a user than by this file:
+#
+#   the tag does not match the version in package.xml   the Addon Manager shows the manifest version
+#   CHANGELOG.md has no heading for that version        a release nobody can read the contents of
+#   lib/ is missing a library for either platform       installs, then fails on first use on that one
+#   the library in lib/ is not the version the binding  refused at load, so the addon does nothing
+#     was written against
+#   the library cannot say which commit it is           a shipped binary nobody can trace back
+#
+# The last one is why kin5ax compiles its commit in. A shared library in lib/ travels inside this
+# repository with nothing else to say where it came from, and "0.1.0" is every build of that minor.
+name: Release the addon
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v0.1.0. Created on this commit if it does not exist.'
+        required: true
+        type: string
+      publish:
+        description: 'Publish at the end, rather than leaving the release a draft'
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: 'Mark it a pre-release'
+        required: false
+        default: false
+        type: boolean
+      update_releases_branch:
+        description: 'Move the releases branch to this commit, which is what the Addon Manager installs'
+        required: false
+        default: true
+        type: boolean
+      allow_untraceable_library:
+        description: 'Release even though lib/ cannot say which commit it was built from'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write     # the release, its tag, and moving the releases branch
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # Seconds, and it catches the mistakes that are made while typing the tag into the dispatch form
+  preflight:
+    name: The repository agrees with the tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version, changelog and the libraries
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import os, re, sys, xml.etree.ElementTree as ET
+
+          tag = os.environ["TAG"]
+          wrong = []
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+              wrong.append("the tag %r is not of the form v1.2.3" % tag)
+          version = tag[1:]
+
+          root = ET.parse("package.xml").getroot()
+          declared = next((e.text.strip() for e in root
+                           if e.tag.rsplit("}", 1)[-1] == "version"), None)
+          if declared != version:
+              wrong.append("package.xml says version %r, the tag says %r" % (declared, version))
+
+          changelog = open("CHANGELOG.md", encoding="utf-8").read()
+          if "## [%s]" % version not in changelog:
+              wrong.append("CHANGELOG.md has no '## [%s]' heading" % version)
+
+          for name in ("lib/kin5axc.dll", "lib/libkin5axc.so"):
+              if not os.path.isfile(name):
+                  wrong.append("%s is missing, so one platform would install and not work" % name)
+              elif os.path.getsize(name) < 100000:
+                  wrong.append("%s is %d bytes, which is not a library" % (name, os.path.getsize(name)))
+
+          if wrong:
+              sys.exit("\n".join("- " + w for w in wrong))
+          print("releasing %s as %s" % (version, tag))
+          PY
+
+  # Each platform loads the library this release would ship on it. A binary that was never loaded
+  # anywhere but the machine that built it is a promise nobody has tested.
+  verify:
+    name: ${{ matrix.platform }}
+    needs: preflight
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            library: lib/libkin5axc.so
+          - os: windows-latest
+            platform: windows-x64
+            library: lib/kin5axc.dll
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: The shipped library loads and is the one the binding expects
+        env:
+          LIBRARY: ${{ matrix.library }}
+          PLATFORM: ${{ matrix.platform }}
+          ALLOW_UNTRACEABLE: ${{ inputs.allow_untraceable_library }}
+        run: |
+          python - <<'PY'
+          import ctypes, os, sys
+          sys.path.insert(0, os.getcwd())
+          from kin5axcam import kin5ax
+
+          path = os.path.abspath(os.environ["LIBRARY"])
+          # loading it through the binding is the real test: the binding checks the version itself,
+          # and a mismatch raises IncompatibleLibrary rather than being read at the wrong offsets.
+          # load() takes the path and caches what it loaded, so the calls after it take no argument.
+          lib = kin5ax.load(path)
+          version = kin5ax.version()
+          major, minor, patch = kin5ax.version_numbers()
+          print(os.environ["PLATFORM"], "loads", path)
+          print("  version ", version)
+          if (major, minor) != kin5ax.REQUIRED_VERSION:
+              sys.exit("the binding needs %d.%d and this library is %s"
+                       % (kin5ax.REQUIRED_VERSION + (version,)))
+
+          # which commit it was built from: kin5ax 0.1.0 and later compile it in
+          try:
+              lib.k5_commit_hash.restype = ctypes.c_char_p
+              commit = lib.k5_commit_hash().decode()
+          except AttributeError:
+              commit = None
+          print("  commit  ", commit or "not reported")
+
+          trouble = None
+          if commit is None:
+              trouble = ("this library does not export k5_commit_hash, so it was built before kin5ax "
+                         "gained commit stamping. Rebuild lib/ from a kin5ax release.")
+          elif commit in ("unknown", "") or commit.endswith("-dirty"):
+              trouble = ("this library reports its commit as %r, so it cannot be traced to any "
+                         "source. Rebuild lib/ from a kin5ax release rather than by hand." % commit)
+
+          if trouble:
+              if os.environ["ALLOW_UNTRACEABLE"] == "true":
+                  print("::warning::" + trouble)
+              else:
+                  sys.exit(trouble + "\n\nRun again with 'allow untraceable library' ticked to "
+                           "release anyway.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("- `%s` ships kin5ax %s (%s)\n"
+                            % (os.environ["PLATFORM"], version, commit or "commit not reported"))
+          PY
+
+      # The tests that need no FreeCAD, which is the geometry, the binding and the postprocessor.
+      # The ones that need FreeCAD are run by hand; see CONTRIBUTING.md.
+      - name: The suite
+        run: python run_tests.py
+
+  release:
+    name: Release
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # the releases branch is moved below, which needs its history
+
+      # git archive takes exactly the tracked files, so no __pycache__ and no local leftovers, and
+      # the prefix is the folder name the Addon Manager would install under.
+      - name: Package it the way it is installed
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git archive --format=zip --prefix=kin5ax-cam-freecad/ HEAD \
+            -o "kin5ax-cam-freecad-$TAG.zip"
+          unzip -l "kin5ax-cam-freecad-$TAG.zip" | tail -3
+
+      - name: Create the draft release and attach it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release $TAG exists already. Delete it, or choose another tag."
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "kin5axcam $TAG" \
+            --notes-file CHANGELOG.md \
+            --draft \
+            ${{ inputs.prerelease && '--prerelease' || '' }}
+          gh release upload "$TAG" "kin5ax-cam-freecad-$TAG.zip" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      # package.xml names the releases branch, so this is the branch the Addon Manager installs from.
+      # A plain push, which fails rather than forces if releases holds anything this commit does not.
+      - name: Move the releases branch here
+        if: ${{ inputs.update_releases_branch }}
+        run: |
+          git push origin "HEAD:refs/heads/releases"
+
+      - name: Publish
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Where it is
+        run: |
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            echo "Published **${{ inputs.tag }}**." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Uploaded to the **draft** release ${{ inputs.tag }}. Publish it by hand, or run again with *publish* ticked." >> "$GITHUB_STEP_SUMMARY"
+          fi

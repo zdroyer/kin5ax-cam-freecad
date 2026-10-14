@@ -251,7 +251,10 @@ been. The report of the solve is a property too.
 
 **The player** is the task panel the simulate command opens: a slider over the locations, play and
 pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
-nothing else.
+nothing else. A tick passes a **turn in place** — a run of locations whose tip does not move, which
+is the tool reorienting at one point: the swing of a lead angle at the end of a pass, or the solver's
+way through a singular direction of a wrist — in one go and says how many it passed; the cut is made
+at every one of them either way. *Every location* draws them all.
 
 Properties worth knowing: `Operations` (none means every active operation of the job), the holder
 the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and

@@ -12,6 +12,13 @@ The player is a task panel: a slider over the locations of the trajectory, play
 and pause on a timer, a step either way, run to the end, and the report of the
 solve. It moves ``Step`` of the simulation and nothing else; the simulation
 moves the machine.
+
+A tick of the player passes a **turn in place** - a run of locations whose tip
+does not move, which is the tool reorienting at one point: the swing of a lead
+angle at the end of a pass, or the solver's way through a singular direction
+of a wrist - in one go, and the label says how many locations it passed. The
+cut is made at every one of them either way; what is skipped is the drawing,
+which showed the machine standing still. "Every location" shows them all.
 """
 
 import os
@@ -205,6 +212,12 @@ class Player(object):
         speed.addWidget(self.rate)
         layout.addLayout(speed)
 
+        self.everyLocation = QtGui.QCheckBox(translate("Kin5axMachine", "Every location"), self.form)
+        self.everyLocation.setToolTip(translate(
+            "Kin5axMachine", "Draw every location, the ones of a turn in place too; off, a tick "
+            "passes a turn in place - the tool reorienting at one point - in one go"))
+        speed.addWidget(self.everyLocation)
+
         #the joint markers of the machine: shown or not, larger or smaller
         if sim.Machine is not None:
             joints = QtGui.QHBoxLayout()
@@ -233,7 +246,38 @@ class Player(object):
         self.timer.timeout.connect(self.tick)
         #a step in progress: a tick that arrives while one is being drawn is dropped, never nested
         self._busy = False
+        self._passed = 0                    #locations passed in one go by the last tick
         self.describe()
+
+    def tipOf(self, step):
+        tips = self.simulation.Tips
+        return tips[3 * step:3 * step + 3] if 3 * step + 3 <= len(tips) else None
+
+    def nextToDraw(self, step):
+        """The step the next tick goes to: the first one after this whose tip has moved.
+
+        Half a voxel when cutting, a tenth of a millimetre otherwise, is what
+        counts as having moved; the last location of the trajectory and the
+        first of another operation are always drawn.
+        """
+        sim = self.simulation
+        last = sim.StepCount - 1
+        if self.everyLocation.isChecked() or step >= last:
+            return min(step + 1, last)
+        here = self.tipOf(step)
+        if here is None:
+            return step + 1
+        moved = 0.5 * sim.Proxy.voxelSize(sim) if getattr(sim, "Cut", False) else 0.1
+        operations = sim.StepOperations
+        following = step + 1
+        while following < last:
+            there = self.tipOf(following)
+            if there is None or sum((there[k] - here[k]) ** 2 for k in range(3)) >= moved * moved:
+                break
+            if following < len(operations) and operations[following] != operations[step]:
+                break
+            following += 1
+        return following
 
     @classmethod
     def show(cls, sim):
@@ -271,6 +315,9 @@ class Player(object):
         if getattr(sim, "Cut", False) and sim.Surface is not None:
             text += "\n" + translate("Kin5axMachine", "cut: %.0f mm3 removed, %d gouges") % (
                 sim.RemovedVolume, sim.Gouges)
+        if self._passed > 1:
+            text += "\n" + translate("Kin5axMachine", "a turn in place: %d locations passed in one go") % (
+                self._passed)
         self.where.setText(text)
 
     def slide(self, value):
@@ -325,7 +372,9 @@ class Player(object):
         if self.slider.value() >= self.slider.maximum():
             self.pause()
             return
-        self.slider.setValue(self.slider.value() + 1)
+        following = self.nextToDraw(self.slider.value())
+        self._passed = following - self.slider.value()
+        self.slider.setValue(following)
 
     def getStandardButtons(self):
         return QtGui.QDialogButtonBox.Close

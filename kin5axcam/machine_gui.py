@@ -315,6 +315,9 @@ class Player(object):
         if getattr(sim, "Cut", False) and sim.Surface is not None:
             text += "\n" + translate("Kin5axMachine", "cut: %.0f mm3 removed, %d gouges") % (
                 sim.RemovedVolume, sim.Gouges)
+        if list(getattr(sim, "Collided", [])):
+            text += "\n" + translate("Kin5axMachine", "what meets here: %s") % (
+                "; ".join(sim.Collided))
         if self._passed > 1:
             text += "\n" + translate("Kin5axMachine", "a turn in place: %d locations passed in one go") % (
                 self._passed)

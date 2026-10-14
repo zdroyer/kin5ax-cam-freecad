@@ -254,6 +254,13 @@ same lines are in the report under *what met*. A pair is counted once per locati
 its configurations it rejected. That is the difference between knowing a path collides and knowing
 the machine cannot tilt that far.
 
+**And it is shown.** A location the machine cannot reach *because it would collide* is not skipped
+over: the machine is posed at a configuration that puts the tool where that location asks — the
+collision check off, the configuration nearest the pose before it, which is the one it would have
+swung into — and the two solids that meet there are painted red, the tool and its holder among them.
+`Collided` names them for that location and the player says *what meets here*. Stepping to a location
+that solves takes the paint off.
+
 **The player** is the task panel the simulate command opens: a slider over the locations, play and
 pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
 nothing else. A tick passes a **turn in place** — a run of locations whose tip does not move, which
@@ -452,7 +459,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-143 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+144 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

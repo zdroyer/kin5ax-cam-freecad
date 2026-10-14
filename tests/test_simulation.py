@@ -252,6 +252,65 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertEqual([], list(sim.Collisions))
         self.assertNotIn("what met:", sim.Report)
 
+    def test_a_colliding_location_is_shown_with_the_solids_that_meet_there(self):
+        """The machine is posed where it would have had to be, and the pair that meets there is named.
+
+        The painting itself needs view objects, which a console FreeCAD has not
+        got; what is checked here is the pose, the names and - where there is a
+        view - the colour.
+        """
+        wrist = os.path.join(CHAINS, "3CWithSphericalWrist_withBaseBox.kc")
+        if not os.path.isfile(wrist):
+            self.skipTest("no spherical wrist model in the test set")
+        from kin5axcam import machine
+
+        sim = self.simulation
+        sim.Machine = machine.Create("Wrist", wrist, 1000.0, self.document)
+        self.operation.LeanAngle = 60.0
+        self.document.recompute()
+        colliding = [i for i in range(sim.StepCount)
+                     if not sim.Solved[i] and sim.Statuses[i] == kin5ax.COLLISION]
+        self.assertGreater(len(colliding), 0, sim.Report)
+
+        solids = sim.Machine.Proxy.solids(sim.Machine)
+        self.assertGreater(len(solids), 0, "the machine has solids to name")
+        sim.Step = colliding[0]
+        self.assertGreater(len(sim.Collided), 0, "what meets there is said")
+        named = set()
+        for line in sim.Collided:
+            for word in (" and ", " cuts into ", " is in "):
+                if word in line:
+                    named.update(line.split(word))
+        self.assertTrue(named & set(solids), "a solid of the machine is named: %r" % sim.Collided)
+        for line in sim.Collided:
+            self.assertNotIn(":", line, "the names alone, without the count of the whole path")
+
+        #the machine stands where it would have had to stand: the tool at the location of the step
+        tip = sim.Tips[3 * sim.Step:3 * sim.Step + 3]
+        chain = sim.Machine.Proxy.chain(sim.Machine)
+        from kin5axcam import solve
+        model = solve.tool_model_of(self.operation, sim.Proxy.options(sim))
+        tool = model.to_kin5ax(sim.Machine.UnitInMillimetres)
+        point, _ = chain.tool_point(sim.Machine.Configuration, tool)
+        tool.close()
+        centre = model.programmed_point(tip, sim.Axes[3 * sim.Step:3 * sim.Step + 3])
+        for i in range(3):
+            self.assertAlmostEqual(centre[i], point[i] * sim.Machine.UnitInMillimetres, delta=1e-3,
+                                   msg="the machine is posed at the location it could not reach")
+
+        painted = [name for name, (feature, _) in solids.items()
+                   if feature.ViewObject is not None
+                   and tuple(feature.ViewObject.ShapeColor)[:3] == machine.COLLIDING]
+        if painted:
+            for name in painted:
+                self.assertTrue(any(name in line for line in sim.Collided), name)
+
+        #a location that solves takes the names, and the paint, off again
+        solved = [i for i in range(sim.StepCount) if sim.Solved[i]]
+        if solved:
+            sim.Step = solved[0]
+            self.assertEqual([], list(sim.Collided))
+
     def test_a_part_the_machine_cannot_reach_is_marked_where_its_tip_would_be(self):
         self.box.Placement.Base = FreeCAD.Vector(5000.0, 0.0, 0.0)
         self.document.recompute()

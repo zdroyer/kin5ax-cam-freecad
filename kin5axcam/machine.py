@@ -13,6 +13,11 @@ chain and in the units of its file - and every part is placed by the frames
 kin5ax computes for that configuration. Nothing here knows about a path; that
 is the simulation, which drives this.
 
+A solid of a segment is named here as the library names it in a collision
+report, so that ``highlight`` can be handed the names of a pair that met and
+colour exactly those two - which is what a simulation does when it stops at a
+location the machine cannot reach.
+
 Every joint shows its value the way the application of kin5ax draws it: a
 revolute joint as a sector of a disc swept from zero to the angle it stands at,
 a prismatic one as a box as long as its slide, magenta for a positive value and
@@ -42,6 +47,10 @@ NEGATIVE = (0.0, 1.0, 1.0)              #cyan
 ZERO = (0.5, 0.5, 0.5)                  #nothing to sweep, nothing to slide
 #the thickness of the disc of a revolute marker, as a fraction of its radius
 DISC_THICKNESS = 0.08
+
+#a solid that met another one, and the colours a branch is painted otherwise
+COLLIDING = (1.0, 0.1, 0.1)
+BRANCH_COLOURS = {kin5ax.PART_TOOL: (0.55, 0.62, 0.75), kin5ax.PART_MATERIAL_HOLDER: (0.75, 0.68, 0.5)}
 
 
 def placement_of(frame, unit_in_mm):
@@ -234,8 +243,41 @@ class ObjectMachine(object):
         view = getattr(feature, "ViewObject", None)
         if view is None:
             return
-        view.ShapeColor = (0.55, 0.62, 0.75) if part == kin5ax.PART_TOOL else (0.75, 0.68, 0.5)
+        view.ShapeColor = BRANCH_COLOURS[part]
         view.Transparency = int(transparency * 100)
+
+    def solids(self, obj):
+        """Every box of the machine by the name a collision report calls it: {name: the feature}.
+
+        The names come from the library, so a pair of k5_path_collision or of
+        k5_chain_collision can be looked up here without guessing at how the
+        chain file names anything.
+        """
+        chain = self.chain(obj)
+        found = {}
+        for part, name in BRANCHES:
+            bodies = getattr(obj, name + "Bodies")
+            for index, body in enumerate(bodies):
+                boxes = [o for o in body.Group if o.Name.startswith(obj.Name + name + "Box")]
+                for box, feature in enumerate(boxes):
+                    found[chain.solid_name(part, index, box)] = (feature, part)
+        return found
+
+    def highlight(self, obj, names):
+        """Paints the solids of those names as colliding and every other one as it was.
+
+        names: whatever a collision report named, the tool's own names among
+        them - those belong to the simulation, which paints its own tool, and
+        are passed over here.
+        """
+        wanted = set(names or ())
+        for name, (feature, part) in self.solids(obj).items():
+            view = getattr(feature, "ViewObject", None)
+            if view is None:
+                continue
+            colour = COLLIDING if name in wanted else BRANCH_COLOURS[part]
+            if tuple(view.ShapeColor)[:3] != colour:
+                view.ShapeColor = colour
 
     def pose(self, obj):
         """Places every part by the frames of the chain at the configuration the machine stands at.

@@ -8,6 +8,12 @@ that configuration, the tool of the operation hanging from the tool mount and
 the model and the stock of the job sitting in the frame of the material. A
 location the machine cannot reach is a marker where its tip would have been.
 
+A location the machine cannot reach **because it would collide** is shown
+rather than skipped: the machine is posed at a configuration that puts the tool
+where the location asks, collisions ignored, and the two solids that meet there
+are painted red - the machine caught in the act. ``Collided`` says which, for
+that location.
+
 Recomputing the simulation solves the whole trajectory again - the batch; the
 player of the task panel moves ``Step`` - the picture. Both run on
 ``kin5axcam.solve``, as the postprocessor does, so what is seen here is what is
@@ -97,6 +103,8 @@ class ObjectSimulation(object):
          "What came of the solve: the counts by status and the largest errors", None),
         ("App::PropertyStringList", "Collisions",
          "Which solids of the machine met on the way, and at how many locations each pair did", None),
+        ("App::PropertyStringList", "Collided",
+         "Which solids meet at the location the machine is shown at, when it cannot reach it", None),
         ("App::PropertyFloat", "RemovedVolume",
          "The volume cut off the stock so far, in cubic millimetres", None),
         ("App::PropertyInteger", "Gouges",
@@ -123,7 +131,8 @@ class ObjectSimulation(object):
 
     #what the solve and the picture fill in, which nobody edits by hand
     READ_ONLY = ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
-                 "Report", "Collisions", "RemovedVolume", "Gouges", "FirstGouge", "Tool", "Holder",
+                 "Report", "Collisions", "Collided", "RemovedVolume", "Gouges", "FirstGouge", "Tool",
+                 "Holder",
                  "Workpiece", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
 
     def __init__(self, obj, machine_object, job):
@@ -613,6 +622,12 @@ class ObjectSimulation(object):
         machine_object = obj.Machine
         if machine_object is not None:
             q = self.configurationAt(obj, step)
+            if q is None:
+                #nothing solved here; when what stopped it was a collision, the machine is put where
+                #it would have had to be and what met there is painted
+                q = self.showCollision(obj, step)
+            else:
+                self.showCollision(obj, step, nothing=True)
             if q is not None:
                 machine_object.Configuration = q
                 #set from here rather than by the machine's own recompute: the touch is purged
@@ -621,6 +636,79 @@ class ObjectSimulation(object):
             self.placeToolFrame(obj, step)
         if obj.Cut:
             self.cutTo(obj, step)
+
+    def showCollision(self, obj, step, nothing=False):
+        """The machine at a configuration of a colliding location, with what meets there painted red.
+
+        Returns that configuration, or None when there is nothing to show -
+        another status, no tool, or a location the machine cannot reach for a
+        reason of its own. nothing=True only clears what the step before painted.
+        """
+        machine_object = obj.Machine
+        if machine_object is None:
+            return None
+        collided = []
+        configuration = None
+        if not nothing and step < len(obj.Statuses) and obj.Statuses[step] == kin5ax.COLLISION:
+            try:
+                configuration, collided = self.collisionAt(obj, step)
+            except Exception as problem:
+                FreeCAD.Console.PrintWarning("kin5axcam: what met at location %d cannot be shown: %s\n"
+                                             % (step + 1, problem))
+        if list(obj.Collided) != collided:
+            obj.Collided = collided
+            machine_object.Proxy.highlight(machine_object, collided)
+            self.paintTool(obj, collided)
+        return configuration
+
+    def collisionAt(self, obj, step):
+        """Where the machine would have to be for that location, and which solids meet there.
+
+        The location has no solution, so the configurations are asked for again
+        with the collision check off; the one nearest the pose shown before it is
+        taken, which is the one the machine would have swung into.
+        """
+        operations = self.operations(obj)
+        index = obj.StepOperations[step] if step < len(obj.StepOperations) else 0
+        if index >= len(operations):
+            return None, []
+        options = self.options(obj)
+        model = solve.tool_model_of(operations[index], options)
+        if model is None:
+            return None, []
+        scale = options.unit_in_mm
+        tip = obj.Tips[3 * step:3 * step + 3]
+        axis = obj.Axes[3 * step:3 * step + 3]
+        point = model.programmed_point(tip, axis)
+        settings = options.settings()
+        settings.check_collisions = 0
+        chain = obj.Machine.Proxy.chain(obj.Machine)
+        tool = model.to_kin5ax(scale)
+        try:
+            configurations, _ = chain.solve_location([c / scale for c in point], axis, settings, tool)
+            if not configurations:
+                return None, []
+            shown = list(obj.Machine.Configuration) or None
+            if shown and len(shown) == kin5ax.AXES:
+                configurations.sort(key=lambda q: sum((q[i] - shown[i]) ** 2 for i in range(kin5ax.AXES)))
+            configuration = configurations[0]
+            chain.set_configuration(configuration)
+            met = chain.check_collisions(tool)
+        finally:
+            tool.close()
+        return configuration, [pair.describe().rsplit(":", 1)[0] for pair in met]
+
+    def paintTool(self, obj, collided):
+        """The tool and its holder red when a pair of that location names them, as they were otherwise."""
+        named = " ".join(collided)
+        for owned, normal, word in ((obj.Tool, (0.85, 0.85, 0.9), "the tool"),
+                                    (obj.Holder, (0.4, 0.4, 0.45), "the shank or the holder")):
+            view = getattr(owned, "ViewObject", None) if owned is not None else None
+            if view is None:
+                continue
+            colour = machine.COLLIDING if word in named else normal
+            if tuple(view.ShapeColor)[:3] != colour:
+                view.ShapeColor = colour
 
     def placeToolFrame(self, obj, step):
         """The tool frame at the tip and the axis of the step: Z along the axis, the mount up it.

@@ -369,6 +369,15 @@ def _declare(lib):
                                            ctypes.c_size_t, _size_p]
     lib.k5_chain_set_configuration.restype = ctypes.c_int
     lib.k5_chain_set_configuration.argtypes = [_chain_t, _double_p]
+    lib.k5_chain_solid_name.restype = ctypes.c_int
+    lib.k5_chain_solid_name.argtypes = [_chain_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_size_t,
+                                        ctypes.c_char_p, ctypes.c_size_t]
+    lib.k5_chain_check_collisions.restype = ctypes.c_int
+    lib.k5_chain_check_collisions.argtypes = [_chain_t, _tool_t, _int_p]
+    lib.k5_chain_collision_count.restype = ctypes.c_int
+    lib.k5_chain_collision_count.argtypes = [_chain_t, _size_p]
+    lib.k5_chain_collision.restype = ctypes.c_int
+    lib.k5_chain_collision.argtypes = [_chain_t, ctypes.c_size_t, ctypes.POINTER(Collision)]
     lib.k5_chain_tool_point.restype = ctypes.c_int
     lib.k5_chain_tool_point.argtypes = [_chain_t, _tool_t, _double_p, _double_p, _double_p]
 
@@ -731,6 +740,36 @@ class Chain(object):
         """Puts the chain into these joint values, limits unchecked; frames() and links() follow."""
         _check(self._lib, self._lib.k5_chain_set_configuration(self._handle, _doubles(q, AXES, "q")),
                "k5_chain_set_configuration")
+
+    def solid_name(self, part, segment, box):
+        """What a report calls one solid of a segment: the name to match a drawn part against."""
+        out = ctypes.create_string_buffer(NAME_MAX)
+        _check(self._lib, self._lib.k5_chain_solid_name(self._handle, int(part), int(segment), int(box),
+                                                        out, NAME_MAX), "k5_chain_solid_name")
+        return out.value.decode("utf-8", "replace")
+
+    def check_collisions(self, tool):
+        """Which solids met at the configuration the chain stands in: a list of Collision, or empty.
+
+        The counts are of this one check, so every pair is 1. A solve makes its
+        own checks, so ask before solving anything else on this chain.
+        """
+        collides = ctypes.c_int()
+        _check(self._lib, self._lib.k5_chain_check_collisions(self._handle, tool.handle,
+                                                              ctypes.byref(collides)),
+               "k5_chain_check_collisions")
+        if not collides.value:
+            return []
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_chain_collision_count(self._handle, ctypes.byref(count)),
+               "k5_chain_collision_count")
+        pairs = []
+        for index in range(count.value):
+            pair = Collision()
+            _check(self._lib, self._lib.k5_chain_collision(self._handle, index, ctypes.byref(pair)),
+                   "k5_chain_collision")
+            pairs.append(pair)
+        return pairs
 
     def tool_point(self, q, tool=None):
         """The forward kinematics: where the programmed point ends up, and the tool axis, for these joints."""

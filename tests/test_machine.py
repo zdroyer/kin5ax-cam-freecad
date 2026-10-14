@@ -175,6 +175,19 @@ class AMachineInADocument(unittest.TestCase):
         self.assertAlmostEqual(50.0, box.BoundBox.ZLength, delta=1e-6)
         self.assertAlmostEqual(-50.0, box.BoundBox.ZMin, delta=1e-6, msg="from the travel up to zero")
 
+    def test_a_joint_that_did_not_move_is_not_shaped_again(self):
+        """Rebuilding a shape is work for the view; a step moves two or three joints of five."""
+        machine = self.machine
+        machine.Configuration = [0.0, 0.0, 0.0, 0.1, 0.5]
+        shown = dict(machine.Proxy._shown_joints)
+        machine.Configuration = [0.0, 0.0, 0.0, 0.2, 0.5]
+        after = machine.Proxy._shown_joints
+        changed = [name for name in after if after[name] != shown.get(name)]
+        self.assertEqual([machine.ToolJoints[0].Name], changed, "the Z marker and no other")
+        machine.JointSize = machine.JointSize * 1.5
+        self.assertTrue(all(machine.Proxy._shown_joints[name] != after[name] for name in after),
+                        "a new size shapes every marker again")
+
     def test_the_markers_follow_the_size_they_are_given(self):
         self.machine.Configuration = [0.0, 0.0, 0.0, 0.1, 0.5]
         before = self.machine.ToolJoints[1].Shape.BoundBox.XLength

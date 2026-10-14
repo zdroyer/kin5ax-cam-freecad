@@ -105,12 +105,14 @@ class ObjectMachine(object):
 
     def loads(self, state):
         self._chain = None
+        self._shown_joints = None
 
     def __getstate__(self):
         return None
 
     def __setstate__(self, state):
         self._chain = None
+        self._shown_joints = None
 
     def chain(self, obj):
         """The chain of the library, opened on first use and kept for the life of the proxy."""
@@ -249,13 +251,21 @@ class ObjectMachine(object):
                 obj.Material.Placement = end
         self.showJoints(obj, chain)
 
-    def showJoints(self, obj, chain):
-        """Every joint marker shaped to the value its joint stands at, and painted by the sign of it."""
+    def showJoints(self, obj, chain, everything=False):
+        """Every joint marker shaped to the value its joint stands at, and painted by the sign of it.
+
+        A marker whose joint has not moved since it was last shaped is left as
+        it is: a shape handed to the view is work for the view, and a step of a
+        path moves two or three joints of five, not all of them.
+        """
         import Part
 
         links = chain.links()
         size = obj.JointSize or self.automaticJointSize(chain, obj.UnitInMillimetres)
         unit = obj.UnitInMillimetres
+        shown = getattr(self, "_shown_joints", None)
+        if shown is None or everything:
+            shown = self._shown_joints = {}
         for part, name in BRANCHES:
             markers = getattr(obj, name + "Joints", [])
             for index, marker in enumerate(markers):
@@ -264,6 +274,10 @@ class ObjectMachine(object):
                     continue
                 link = links[link_index]
                 value = link.value
+                key = (marker.Name, round(value, 9), size, bool(obj.ShowJoints))
+                if shown.get(marker.Name) == key:
+                    continue
+                shown[marker.Name] = key
                 if link.is_revolute:
                     marker.Shape = self.sector(size, value)
                 else:
@@ -315,7 +329,7 @@ class ObjectMachine(object):
                 FreeCAD.Console.PrintError("kin5axcam: the machine cannot be posed: %s\n" % problem)
         elif prop in ("JointSize", "ShowJoints"):
             try:
-                self.showJoints(obj, self.chain(obj))
+                self.showJoints(obj, self.chain(obj), everything=True)
             except Exception as problem:
                 FreeCAD.Console.PrintError("kin5axcam: the joints cannot be shown: %s\n" % problem)
 
@@ -324,6 +338,7 @@ class ObjectMachine(object):
 
     def onDocumentRestored(self, obj):
         self._chain = None
+        self._shown_joints = None
 
 
 def Create(name, chain_file, unit_in_mm=1000.0, document=None):

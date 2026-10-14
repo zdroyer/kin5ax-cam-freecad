@@ -231,6 +231,8 @@ class Player(object):
 
         self.timer = QtCore.QTimer(self.form)
         self.timer.timeout.connect(self.tick)
+        #a step in progress: a tick that arrives while one is being drawn is dropped, never nested
+        self._busy = False
         self.describe()
 
     @classmethod
@@ -272,11 +274,23 @@ class Player(object):
         self.where.setText(text)
 
     def slide(self, value):
-        sim = self.simulation
-        if sim.Step != value:
-            sim.Step = value
-        self.describe()
-        FreeCADGui.updateGui()
+        """One step: the simulation poses the machine and cuts, the view repaints when this returns.
+
+        Nothing here processes events. A call to updateGui() from inside this
+        slot let the next tick of the timer in while the shapes and the mesh of
+        the step were still being handed to the view, and FreeCAD went down in
+        Qt with an access violation on the second operation of a job.
+        """
+        if self._busy:
+            return
+        self._busy = True
+        try:
+            sim = self.simulation
+            if sim.Step != value:
+                sim.Step = value
+            self.describe()
+        finally:
+            self._busy = False
 
     def goto(self, value):
         self.slider.setValue(max(0, min(value, self.slider.maximum())))
@@ -285,13 +299,11 @@ class Player(object):
         machine_object = self.simulation.Machine
         if machine_object is not None:
             machine_object.ShowJoints = bool(state)
-            FreeCADGui.updateGui()
 
     def resizeJoints(self, factor):
         machine_object = self.simulation.Machine
         if machine_object is not None:
             machine_object.JointSize = max(1.0, machine_object.JointSize * factor)
-            FreeCADGui.updateGui()
 
     def toggle(self):
         if self.timer.isActive():
@@ -308,6 +320,8 @@ class Player(object):
 
     def tick(self):
         self.timer.setInterval(max(1, int(1000.0 / self.rate.value())))
+        if self._busy:
+            return                              #the step before is still being drawn
         if self.slider.value() >= self.slider.maximum():
             self.pause()
             return

@@ -16,7 +16,9 @@ moves the machine.
 **Pause on a collision or a gouge** stops the playback where the machine first
 meets itself or the tool first drags its shank through material - at the start
 of such a stretch, not at every location of it, so that pressing play again
-carries on rather than stopping on the spot.
+carries on rather than stopping on the spot. **Cut in a collision** cuts the
+stock at those locations too, and **Reset** makes the stock whole again, forgets
+what has met what, and goes back to the first location.
 
 A tick of the player passes a **turn in place** - a run of locations whose tip
 does not move, which is the tool reorienting at one point: the swing of a lead
@@ -217,6 +219,13 @@ class Player(object):
         speed.addWidget(self.rate)
         layout.addLayout(speed)
 
+        self.reset = QtGui.QPushButton(translate("Kin5axMachine", "Reset"), self.form)
+        self.reset.setToolTip(translate(
+            "Kin5axMachine", "The stock whole again, nothing marked as having met anything, and back "
+            "to the first location"))
+        self.reset.clicked.connect(self.resetRun)
+        buttons.addWidget(self.reset)
+
         self.pauseOnTrouble = QtGui.QCheckBox(
             translate("Kin5axMachine", "Pause on a collision or a gouge"), self.form)
         self.pauseOnTrouble.setChecked(True)
@@ -225,6 +234,16 @@ class Player(object):
             "first drags its shank through material - at the start of such a stretch, not at every "
             "location of it"))
         layout.addWidget(self.pauseOnTrouble)
+
+        self.cutInCollision = QtGui.QCheckBox(
+            translate("Kin5axMachine", "Cut in a collision"), self.form)
+        self.cutInCollision.setChecked(bool(getattr(sim, "CutInCollision", True)))
+        self.cutInCollision.setToolTip(translate(
+            "Kin5axMachine", "Cut the stock at a location the machine cannot reach as well: the tool "
+            "was asked to be there, and what it would have taken off is worth seeing beside the "
+            "collision"))
+        self.cutInCollision.stateChanged.connect(self.changeCutInCollision)
+        layout.addWidget(self.cutInCollision)
 
         self.everyLocation = QtGui.QCheckBox(translate("Kin5axMachine", "Every location"), self.form)
         self.everyLocation.setToolTip(translate(
@@ -378,6 +397,25 @@ class Player(object):
 
     def goto(self, value):
         self.slider.setValue(max(0, min(value, self.slider.maximum())))
+
+    def resetRun(self):
+        """The stock whole again, nothing marked, back to the first location."""
+        self.pause()
+        self._gouges = 0
+        self._in_trouble = False
+        self._passed = 0
+        self.simulation.Proxy.reset(self.simulation)
+        self.slider.setValue(0)
+        self.describe()
+
+    def changeCutInCollision(self, state):
+        """The cut is taken again from the start: what was cut, or not cut, is being changed."""
+        sim = self.simulation
+        sim.CutInCollision = bool(state)
+        where = self.slider.value()
+        sim.Proxy.rewindCut(sim)
+        sim.Proxy.pose(sim)
+        self.describe()
 
     def toggleJoints(self, state):
         machine_object = self.simulation.Machine

@@ -257,16 +257,23 @@ the machine cannot tilt that far.
 **And it is shown.** A location the machine cannot reach *because it would collide* is not skipped
 over: the machine is posed at a configuration that puts the tool where that location asks — the
 collision check off, the configuration nearest the pose before it, which is the one it would have
-swung into — and the two solids that meet there are painted: a solid of the machine **red**, the tool
-or its holder **orange**, so which of the two is which needs no reading. `Collided` names the pairs
-for that location and the player says *what meets here*. Stepping to a location that solves takes the
-paint off.
+swung into — and the two solids that meet there are painted **red**, the tool and its holder with
+them. `Collided` names the pairs for that location and the player says *what meets here*. Stepping to
+a location that solves takes the red off, but a solid that has met anything stays **orange** to the
+end of the run (`CollidedEver`), so what a path has cost is still visible once the tool has moved on.
+
+The stock is cut at such a location as well, since the tool was asked to be there and what it would
+have taken off is worth seeing beside the collision — the cutting simulation of the library will not
+go there, having no configuration for it, so the stamp is made straight into the material. `Cut in a
+collision` in the player, `CutInCollision` on the object, turns it off; on the job this came from it
+is 2 472 mm³ of 27 805.
 
 **The player** is the task panel the simulate command opens: a slider over the locations, play and
 pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
 nothing else. **Pause on a collision or a gouge**, on by default, stops the playback where the
 machine first meets itself or the tool first drags its shank through material — at the start of such
-a stretch, not at every location of it, so that pressing play again carries on. A tick passes a **turn in place** — a run of locations whose tip does not move, which
+a stretch, not at every location of it, so that pressing play again carries on. **Reset** makes the
+stock whole again, forgets what has met what, and goes back to the first location. A tick passes a **turn in place** — a run of locations whose tip does not move, which
 is the tool reorienting at one point: the swing of a lead angle at the end of a pass, or the solver's
 way through a singular direction of a wrist — in one go and says how many it passed; the cut is made
 at every one of them either way. *Every location* draws them all.
@@ -462,7 +469,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-144 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+148 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

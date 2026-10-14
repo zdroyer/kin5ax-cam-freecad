@@ -434,6 +434,8 @@ def _declare(lib):
     lib.k5_material_surface.argtypes = [_material_t, _double_p, ctypes.c_size_t, _size_p]
     lib.k5_material_surface_triangles.restype = ctypes.c_int
     lib.k5_material_surface_triangles.argtypes = [_material_t, _double_p, ctypes.c_size_t, _size_p]
+    lib.k5_material_cut.restype = ctypes.c_int
+    lib.k5_material_cut.argtypes = [_material_t, _tool_t, _double_p, _double_p, _int_p, _double_p]
     lib.k5_simulation_create.restype = ctypes.c_int
     lib.k5_simulation_create.argtypes = [_chain_t, _tool_t, _path_t, _material_t,
                                          ctypes.POINTER(_simulation_t)]
@@ -913,6 +915,21 @@ class Material(object):
         _check(self._lib, self._lib.k5_material_surface(self._handle, out, 3 * count.value,
                                                         ctypes.byref(count)), "k5_material_surface")
         return out
+
+    def cut(self, tool, position, axis):
+        """One stamp of the tool at that programmed point and axis, in the unit of this material.
+
+        Returns (gouged, where): whether the shank or the holder is in material
+        that is still there after the cut, and the first such place. For a
+        location a simulation will not cut - one the machine cannot reach, which
+        is still a place the tool was asked to be.
+        """
+        gouged = ctypes.c_int()
+        where = (ctypes.c_double * 3)()
+        _check(self._lib, self._lib.k5_material_cut(
+            self._handle, tool.handle, _doubles(position, 3, "position"), _doubles(axis, 3, "axis"),
+            ctypes.byref(gouged), where), "k5_material_cut")
+        return bool(gouged.value), tuple(where)
 
     def surface_triangles(self):
         """The exposed faces of what is left as triangles, a flat ctypes array of 18 doubles per face.

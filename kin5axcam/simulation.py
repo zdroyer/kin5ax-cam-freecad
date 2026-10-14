@@ -12,7 +12,15 @@ A location the machine cannot reach **because it would collide** is shown
 rather than skipped: the machine is posed at a configuration that puts the tool
 where the location asks, collisions ignored, and the two solids that meet there
 are painted red - the machine caught in the act. ``Collided`` says which, for
-that location.
+that location, and ``CollidedEver`` keeps every solid that has met anything so
+far in the run, which stays orange to the end of it: what a path has cost is
+still visible once the tool has moved on.
+
+The stock is cut at such a location as well, with ``CutInCollision`` on - the
+tool was asked to be there, and what it would have taken off is worth seeing
+beside the collision - which the cutting simulation of the library will not do,
+since it walks a trajectory and that location has no configuration in it. The
+stamp is made straight into the material instead.
 
 Recomputing the simulation solves the whole trajectory again - the batch; the
 player of the task panel moves ``Step`` - the picture. Both run on
@@ -84,6 +92,9 @@ class ObjectSimulation(object):
          "The side of a voxel of the stock; 0 picks one from the size of the stock", 0.0),
         ("App::PropertyInteger", "RefreshEvery",
          "How many cut steps between two redraws of what is left of the stock", 5),
+        ("App::PropertyBool", "CutInCollision",
+         "Cut the stock at a location the machine cannot reach as well: the tool was asked to be "
+         "there, and what it would have taken off is worth seeing beside the collision", True),
 
         ("App::PropertyInteger", "Step",
          "The location of the trajectory the machine is shown at", 0),
@@ -105,6 +116,9 @@ class ObjectSimulation(object):
          "Which solids of the machine met on the way, and at how many locations each pair did", None),
         ("App::PropertyStringList", "Collided",
          "Which solids meet at the location the machine is shown at, when it cannot reach it", None),
+        ("App::PropertyStringList", "CollidedEver",
+         "Every solid that has met anything so far in this run; they stay marked to the end of it",
+         None),
         ("App::PropertyFloat", "RemovedVolume",
          "The volume cut off the stock so far, in cubic millimetres", None),
         ("App::PropertyInteger", "Gouges",
@@ -131,8 +145,8 @@ class ObjectSimulation(object):
 
     #what the solve and the picture fill in, which nobody edits by hand
     READ_ONLY = ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
-                 "Report", "Collisions", "Collided", "RemovedVolume", "Gouges", "FirstGouge", "Tool",
-                 "Holder",
+                 "Report", "Collisions", "Collided", "CollidedEver", "RemovedVolume", "Gouges",
+                 "FirstGouge", "Tool", "Holder",
                  "Workpiece", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
 
     def __init__(self, obj, machine_object, job):
@@ -454,6 +468,8 @@ class ObjectSimulation(object):
         self._runs = None
         self._cut_to = -1
         self._cut_since_refresh = 0
+        self._stamped_gouges = 0            #the gouges of the stamps made outside the simulations
+        self._first_stamped_gouge = None
 
     def prepareCut(self, obj):
         """The block of the library from the stock of the job, and a cutting simulation per run."""
@@ -498,16 +514,41 @@ class ObjectSimulation(object):
         self._cut_to = -1
         self.refreshSurface(obj)
 
+    def rewindCut(self, obj):
+        """The stock whole again and every cut back at its first location: the cut starts afresh."""
+        if self._block is None:
+            return
+        self._block.reset()
+        for cut in (self._cuts or []):
+            if cut is not None:
+                cut.reset()
+        self._cut_to = -1
+        self._stamped_gouges = 0
+        self._first_stamped_gouge = None
+        obj.RemovedVolume = 0.0
+        obj.Gouges = 0
+
+    def reset(self, obj):
+        """Back to the beginning: the stock whole, nothing marked, the machine at the first location."""
+        self.rewindCut(obj)
+        obj.CollidedEver = []
+        obj.Collided = []
+        if obj.Machine is not None:
+            obj.Machine.Proxy.highlight(obj.Machine, [], [])
+        self.paintTool(obj, [])
+        self.markGouge(obj, False)
+        if obj.Step == 0:
+            self.pose(obj)                  #already there: pose it again, since Step will not change
+        else:
+            obj.Step = 0
+        self.refreshSurface(obj)
+
     def cutTo(self, obj, step):
         """Takes the cut up to that step, from a whole block again when the step is behind the cut."""
         if self._block is None or not self._cuts:
             return
         if step < self._cut_to:
-            self._block.reset()
-            for cut in self._cuts:
-                if cut is not None:
-                    cut.reset()
-            self._cut_to = -1
+            self.rewindCut(obj)
         if step == self._cut_to:
             return
         advanced = 0
@@ -526,12 +567,13 @@ class ObjectSimulation(object):
                 advanced += 1
             #the locations without a solution are passed by the library without a cut; the count
             #it reports is of locations passed, the way it is here
+        advanced += self.stampUnreached(obj, self._cut_to + 1, step)
         self._cut_to = step
         self._cut_since_refresh += advanced
         unit = self.unit(obj)
         total, removed = self._block.volumes()
         obj.RemovedVolume = removed * unit ** 3
-        gouges, first_point = 0, None
+        gouges, first_point = self._stamped_gouges, self._first_stamped_gouge
         for cut in self._cuts:
             if cut is None:
                 continue
@@ -547,6 +589,50 @@ class ObjectSimulation(object):
         finished = step >= obj.StepCount - 1
         if self._cut_since_refresh >= max(obj.RefreshEvery, 1) or finished or advanced == 0:
             self.refreshSurface(obj)
+
+    def stampUnreached(self, obj, first, last):
+        """Cuts the stock at the locations of that range the cutting simulation passed without cutting.
+
+        A location the machine cannot reach has no configuration in the
+        trajectory, so the simulation of the library walks past it; the tool was
+        asked to be there all the same. Removing material is the same whichever
+        order it is done in, so these are stamped after the run has been walked.
+        """
+        if not obj.CutInCollision or self._block is None:
+            return 0
+        operations = self.operations(obj)
+        options = self.options(obj)
+        scale = options.unit_in_mm
+        tools = {}
+        stamped = 0
+        try:
+            for step in range(max(first, 0), min(last, obj.StepCount - 1) + 1):
+                if obj.Solved[step]:
+                    continue
+                index = obj.StepOperations[step]
+                if index not in tools:
+                    model = solve.tool_model_of(operations[index], options) if index < len(operations) \
+                        else None
+                    tools[index] = (model, model.to_kin5ax(scale) if model is not None else None)
+                model, tool = tools[index]
+                if tool is None:
+                    continue
+                tip = obj.Tips[3 * step:3 * step + 3]
+                axis = obj.Axes[3 * step:3 * step + 3]
+                if sum(c * c for c in axis) < 1e-18:
+                    continue
+                point = model.programmed_point(tip, axis)
+                gouged, where = self._block.cut(tool, [c / scale for c in point], axis)
+                if gouged:
+                    self._stamped_gouges += 1
+                    if self._first_stamped_gouge is None:
+                        self._first_stamped_gouge = where
+                stamped += 1
+        finally:
+            for _, tool in tools.values():
+                if tool is not None:
+                    tool.close()
+        return stamped
 
     def refreshSurface(self, obj):
         """What is left of the block as a mesh: the exposed faces of its voxels, from the library.
@@ -655,11 +741,16 @@ class ObjectSimulation(object):
             except Exception as problem:
                 FreeCAD.Console.PrintWarning("kin5axcam: what met at location %d cannot be shown: %s\n"
                                              % (step + 1, problem))
-        if list(obj.Collided) != collided:
+        remembered = list(obj.CollidedEver)
+        for name in solids:
+            if name not in remembered:
+                remembered.append(name)
+        if list(obj.Collided) != collided or remembered != list(obj.CollidedEver):
             obj.Collided = collided
+            obj.CollidedEver = remembered
             #the pairs are what a reader wants; what is painted is the single solids they are made of
-            machine_object.Proxy.highlight(machine_object, solids)
-            self.paintTool(obj, solids)
+            machine_object.Proxy.highlight(machine_object, solids, remembered)
+            self.paintTool(obj, solids, remembered)
         return configuration
 
     def collisionAt(self, obj, step):
@@ -708,22 +799,30 @@ class ObjectSimulation(object):
                     solids.append(name)
         return configuration, [pair.describe().rsplit(":", 1)[0] for pair in met], solids
 
-    def paintTool(self, obj, solids):
-        """The tool and its holder in the colliding colour when the report named them, as they were otherwise.
+    def paintTool(self, obj, solids, remembered=()):
+        """The tool and its holder painted as the machine's solids are: red now, orange once met.
 
         The two are named by the library as "the tool" and "the shank or the
         holder"; the holder of the picture is painted for either, since it is
         drawn as one piece with the shank.
         """
         named = set(solids or ())
-        tool_met = "the tool" in named
-        shank_met = "the shank or the holder" in named
-        for owned, normal, met in ((obj.Tool, (0.85, 0.85, 0.9), tool_met or shank_met),
-                                   (obj.Holder, (0.4, 0.4, 0.45), shank_met)):
+        before = set(remembered or ())
+
+        def colour_of(words, normal):
+            if any(word in named for word in words):
+                return machine.COLLIDING
+            if any(word in before for word in words):
+                return machine.COLLIDED_BEFORE
+            return normal
+
+        for owned, normal, words in (
+                (obj.Tool, (0.85, 0.85, 0.9), ("the tool", "the shank or the holder")),
+                (obj.Holder, (0.4, 0.4, 0.45), ("the shank or the holder",))):
             view = getattr(owned, "ViewObject", None) if owned is not None else None
             if view is None:
                 continue
-            colour = machine.COLLIDING_TOOL if met else normal
+            colour = colour_of(words, normal)
             if tuple(view.ShapeColor)[:3] != colour:
                 view.ShapeColor = colour
 

@@ -48,11 +48,11 @@ ZERO = (0.5, 0.5, 0.5)                  #nothing to sweep, nothing to slide
 #the thickness of the disc of a revolute marker, as a fraction of its radius
 DISC_THICKNESS = 0.08
 
-#a solid of the machine that met another one, the tool or its holder when that is what met - a
-#different red, so that which of the two is which is plain - and the colours a branch is painted
-#otherwise
+#a solid that is meeting another one at the location shown, red; one that met something earlier in
+#the run, orange, so that what a path has cost is still visible at the end of it; and the colours a
+#branch is painted when neither
 COLLIDING = (1.0, 0.1, 0.1)
-COLLIDING_TOOL = (1.0, 0.55, 0.0)
+COLLIDED_BEFORE = (1.0, 0.55, 0.0)
 BRANCH_COLOURS = {kin5ax.PART_TOOL: (0.55, 0.62, 0.75), kin5ax.PART_MATERIAL_HOLDER: (0.75, 0.68, 0.5)}
 
 
@@ -266,20 +266,26 @@ class ObjectMachine(object):
                     found[chain.solid_name(part, index, box)] = (feature, part)
         return found
 
-    def highlight(self, obj, names):
-        """Paints the solids of those names as colliding and every other one as it was.
+    def highlight(self, obj, names, remembered=()):
+        """Paints the solids: red where they meet now, orange where they met earlier, as they were otherwise.
 
-        names: the names of single solids, as a collision report gives them -
-        not the description of a pair, which names two of them and matches
-        nothing here. The tool's own names may be among them; they belong to the
-        simulation, which paints its own tool, and are passed over.
+        names and remembered: the names of single solids, as a collision report
+        gives them - not the description of a pair, which names two of them and
+        matches nothing here. The tool's own names may be among them; they
+        belong to the simulation, which paints its own tool, and are passed over.
         """
         wanted = set(names or ())
+        before = set(remembered or ())
         for name, (feature, part) in self.solids(obj).items():
             view = getattr(feature, "ViewObject", None)
             if view is None:
                 continue
-            colour = COLLIDING if name in wanted else BRANCH_COLOURS[part]
+            if name in wanted:
+                colour = COLLIDING
+            elif name in before:
+                colour = COLLIDED_BEFORE
+            else:
+                colour = BRANCH_COLOURS[part]
             if tuple(view.ShapeColor)[:3] != colour:
                 view.ShapeColor = colour
 

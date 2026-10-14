@@ -320,6 +320,69 @@ class AJobOnAMachine(unittest.TestCase):
             sim.Step = solved[0]
             self.assertEqual([], list(sim.Collided))
 
+    def test_the_stock_is_cut_at_a_location_the_machine_cannot_reach_as_well(self):
+        """The tool was asked to be there; the cutting simulation of the library will not go there,
+        so the stamp is made into the material instead."""
+        wrist = os.path.join(CHAINS, "3CWithSphericalWrist_withBaseBox.kc")
+        if not os.path.isfile(wrist):
+            self.skipTest("no spherical wrist model in the test set")
+        from kin5axcam import machine
+
+        sim = self.simulation
+        sim.Machine = machine.Create("Wrist", wrist, 1000.0, self.document)
+        self.operation.LeanAngle = 60.0
+        self.document.recompute()
+        colliding = [i for i in range(sim.StepCount) if not sim.Solved[i]]
+        self.assertGreater(len(colliding), 0)
+
+        self.assertTrue(sim.CutInCollision)
+        sim.Step = sim.StepCount - 1
+        cut_through = sim.RemovedVolume
+        self.assertGreater(cut_through, 0.0)
+
+        sim.CutInCollision = False
+        sim.Proxy.rewindCut(sim)
+        sim.Proxy.pose(sim)
+        self.assertLess(sim.RemovedVolume, cut_through,
+                        "without it the locations that collide take nothing off")
+
+    def test_reset_makes_the_stock_whole_and_goes_back_to_the_first_location(self):
+        sim = self.simulation
+        sim.Step = sim.StepCount - 1
+        self.assertGreater(sim.RemovedVolume, 0.0)
+        sim.Proxy.reset(sim)
+        self.assertEqual(0, sim.Step)
+        self.assertEqual(0.0, sim.RemovedVolume)
+        self.assertEqual([], list(sim.CollidedEver))
+        self.assertEqual([], list(sim.Collided))
+        #and it cuts again from there
+        sim.Step = sim.StepCount - 1
+        self.assertGreater(sim.RemovedVolume, 0.0)
+
+    def test_a_solid_that_has_met_something_stays_marked_for_the_rest_of_the_run(self):
+        wrist = os.path.join(CHAINS, "3CWithSphericalWrist_withBaseBox.kc")
+        if not os.path.isfile(wrist):
+            self.skipTest("no spherical wrist model in the test set")
+        from kin5axcam import machine
+
+        sim = self.simulation
+        sim.Machine = machine.Create("Wrist", wrist, 1000.0, self.document)
+        self.operation.LeanAngle = 60.0
+        self.document.recompute()
+        colliding = [i for i in range(sim.StepCount)
+                     if not sim.Solved[i] and sim.Statuses[i] == kin5ax.COLLISION]
+        self.assertGreater(len(colliding), 0)
+        sim.Step = colliding[0]
+        met = list(sim.CollidedEver)
+        self.assertGreater(len(met), 0)
+        self.assertEqual(sorted(met), sorted(set(met)), "each solid once")
+
+        solved = [i for i in range(sim.StepCount) if sim.Solved[i] and i > colliding[0]]
+        if solved:
+            sim.Step = solved[0]
+            self.assertEqual([], list(sim.Collided), "nothing meets here")
+            self.assertEqual(met, list(sim.CollidedEver), "but what met earlier is still named")
+
     def test_a_part_the_machine_cannot_reach_is_marked_where_its_tip_would_be(self):
         self.box.Placement.Base = FreeCAD.Vector(5000.0, 0.0, 0.0)
         self.document.recompute()

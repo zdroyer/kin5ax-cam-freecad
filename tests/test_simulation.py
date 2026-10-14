@@ -84,6 +84,32 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertIn("solved", self.simulation.Report)
         self.assertIsNone(self.simulation.Unreachable, "nothing to mark")
 
+    def test_the_links_of_the_picture_are_global_and_a_step_leaves_nothing_touched(self):
+        sim = self.simulation
+        for name in ("Tool", "Holder", "Unreachable", "Surface", "GougeMarker"):
+            self.assertEqual("App::PropertyLinkGlobal", sim.getTypeIdOfProperty(name), name)
+        self.assertEqual("App::PropertyLinkListGlobal", sim.getTypeIdOfProperty("Workpiece"))
+        sim.Step = sim.StepCount - 1
+        for owned in [sim.Tool, sim.Holder, sim.Surface, self.machine] + list(sim.Workpiece):
+            self.assertNotIn("Touched", owned.State, owned.Name)
+
+    def test_a_document_with_a_simulation_in_it_opens_again_from_a_script(self):
+        """The proxies are pickled modules; a restore may not import them, so Init.py does first."""
+        import tempfile
+
+        path = os.path.join(tempfile.mkdtemp(prefix="kin5axcam_"), "simulation.FCStd")
+        count = self.simulation.StepCount
+        self.document.saveAs(path)
+        FreeCAD.closeDocument(self.document.Name)
+        self.document = FreeCAD.openDocument(path)
+        sim = self.document.getObject("Simulation")
+        self.assertIsNotNone(sim.Proxy, "the proxy came back")
+        self.assertEqual(count, sim.StepCount)
+        self.assertEqual("App::PropertyLinkGlobal", sim.getTypeIdOfProperty("Tool"))
+        sim.Step = count // 2
+        self.assertEqual(count // 2, sim.Step)
+        os.remove(path)
+
     def test_the_model_and_the_stock_sit_in_the_frame_of_the_material(self):
         linked = {link.LinkedObject.Name for link in self.simulation.Workpiece}
         self.assertIn(self.job.Stock.Name, linked)

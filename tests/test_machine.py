@@ -194,6 +194,29 @@ class AMachineInADocument(unittest.TestCase):
         self.machine.JointSize = self.machine.JointSize * 2.0
         self.assertAlmostEqual(2.0 * before, self.machine.ToolJoints[1].Shape.BoundBox.XLength, delta=1e-6)
 
+    def test_a_link_into_a_part_is_a_global_link_and_a_pose_leaves_nothing_touched(self):
+        """FreeCAD reports an ordinary link into an App::Part as out of scope on every restore, and
+        a placement set from outside a part's recompute leaves it touched; neither is wanted."""
+        for name in ("ToolJoints", "MaterialJoints"):
+            self.assertEqual("App::PropertyLinkListGlobal", self.machine.getTypeIdOfProperty(name))
+        self.machine.Configuration = [0.1, 0.05, -0.02, 0.3, 0.5]
+        for part in self.machine.ToolBodies + self.machine.ToolArms + [self.machine.ToolMount]:
+            self.assertNotIn("Touched", part.State, part.Name)
+        for marker in self.machine.ToolJoints:
+            self.assertNotIn("Touched", marker.State, marker.Name)
+
+    def test_an_older_document_gets_its_links_made_global_on_restore(self):
+        from kin5axcam import machine as module
+
+        self.machine.removeProperty("ToolJoints")
+        self.machine.addProperty("App::PropertyLinkList", "ToolJoints", "Kin5axMachine", "as it was")
+        markers = [m for m in self.document.Objects if m.Name.startswith("MachineToolJoint")]
+        self.machine.ToolJoints = markers
+        module.globalise(self.machine, {"ToolJoints": "App::PropertyLinkListGlobal"})
+        self.assertEqual("App::PropertyLinkListGlobal", self.machine.getTypeIdOfProperty("ToolJoints"))
+        self.assertEqual([m.Name for m in markers], [m.Name for m in self.machine.ToolJoints],
+                         "and it still links to what it linked to")
+
     def test_the_machine_survives_being_saved_and_opened_again(self):
         self.machine.Configuration = [0.1, 0.05, -0.02, 0.3, 0.5]
         mount = FreeCAD.Vector(self.machine.ToolMount.Placement.Base)

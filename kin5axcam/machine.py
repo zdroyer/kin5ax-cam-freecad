@@ -84,7 +84,9 @@ class ObjectMachine(object):
             obj.addProperty("App::PropertyLinkList", name + "Arms", PROPERTY_GROUP,
                             "The parts holding the arms from each segment of the %s branch to the next"
                             % name.lower())
-            obj.addProperty("App::PropertyLinkList", name + "Joints", PROPERTY_GROUP,
+            #a global link: the markers live inside the parts of the segments, and a link into a part
+            #from outside it is out of scope for an ordinary one
+            obj.addProperty("App::PropertyLinkListGlobal", name + "Joints", PROPERTY_GROUP,
                             "The markers of the joints of the %s branch, one per segment that has one"
                             % name.lower())
         obj.addProperty("App::PropertyLink", "ToolMount", PROPERTY_GROUP,
@@ -231,7 +233,12 @@ class ObjectMachine(object):
         view.Transparency = int(transparency * 100)
 
     def pose(self, obj):
-        """Places every part by the frames of the chain at the configuration the machine stands at."""
+        """Places every part by the frames of the chain at the configuration the machine stands at.
+
+        A placement set here is set from outside the part's own recompute, which
+        leaves the part touched; the touch is purged, since nothing of the part
+        depends on it - the placement is the whole of the change.
+        """
         chain = self.chain(obj)
         unit = obj.UnitInMillimetres
         chain.set_configuration(self.configuration(obj))
@@ -242,13 +249,17 @@ class ObjectMachine(object):
             for index, (joint, output) in enumerate(frames):
                 if index < len(bodies):
                     bodies[index].Placement = placement_of(joint, unit)
+                    bodies[index].purgeTouched()
                 if index < len(arms):
                     arms[index].Placement = placement_of(output, unit)
+                    arms[index].purgeTouched()
             end = placement_of(frames[-1][1], unit)
             if part == kin5ax.PART_TOOL and obj.ToolMount is not None:
                 obj.ToolMount.Placement = end
+                obj.ToolMount.purgeTouched()
             if part == kin5ax.PART_MATERIAL_HOLDER and obj.Material is not None:
                 obj.Material.Placement = end
+                obj.Material.purgeTouched()
         self.showJoints(obj, chain)
 
     def showJoints(self, obj, chain, everything=False):
@@ -282,6 +293,7 @@ class ObjectMachine(object):
                     marker.Shape = self.sector(size, value)
                 else:
                     marker.Shape = self.slide(size, value * unit)
+                marker.purgeTouched()
                 view = getattr(marker, "ViewObject", None)
                 if view is not None:
                     view.ShapeColor = POSITIVE if value > 1e-9 else NEGATIVE if value < -1e-9 else ZERO
@@ -339,6 +351,25 @@ class ObjectMachine(object):
     def onDocumentRestored(self, obj):
         self._chain = None
         self._shown_joints = None
+        globalise(obj, {name + "Joints": "App::PropertyLinkListGlobal" for _, name in BRANCHES})
+
+
+def globalise(obj, wanted):
+    """Turns link properties of an older document into the global kind, keeping what they link to.
+
+    A document saved before the links were global has them ordinary, which
+    FreeCAD reports as out of scope on every restore; the property is replaced
+    by one of the right kind with the same value.
+    """
+    for name, kind in wanted.items():
+        if name not in obj.PropertiesList or obj.getTypeIdOfProperty(name) == kind:
+            continue
+        value = getattr(obj, name)
+        group = obj.getGroupOfProperty(name)
+        documentation = obj.getDocumentationOfProperty(name)
+        obj.removeProperty(name)
+        obj.addProperty(kind, name, group, documentation)
+        setattr(obj, name, value)
 
 
 def Create(name, chain_file, unit_in_mm=1000.0, document=None):

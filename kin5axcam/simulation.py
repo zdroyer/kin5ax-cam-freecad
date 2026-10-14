@@ -94,11 +94,13 @@ class ObjectSimulation(object):
                         "The index into Operations of the operation every location belongs to")
         obj.addProperty("App::PropertyString", "Report", PROPERTY_GROUP,
                         "What came of the solve: the counts by status and the largest errors")
-        obj.addProperty("App::PropertyLink", "Tool", PROPERTY_GROUP, "The tool shown at the tool mount")
-        obj.addProperty("App::PropertyLink", "Holder", PROPERTY_GROUP, "The holder shown above it")
-        obj.addProperty("App::PropertyLinkList", "Workpiece", PROPERTY_GROUP,
+        #global links: these live inside parts of the machine or of this object, and a link into a
+        #part from outside it is out of scope for an ordinary one
+        obj.addProperty("App::PropertyLinkGlobal", "Tool", PROPERTY_GROUP, "The tool shown at the tool mount")
+        obj.addProperty("App::PropertyLinkGlobal", "Holder", PROPERTY_GROUP, "The holder shown above it")
+        obj.addProperty("App::PropertyLinkListGlobal", "Workpiece", PROPERTY_GROUP,
                         "The links to the model and the stock of the job, in the frame of the material")
-        obj.addProperty("App::PropertyLink", "Unreachable", PROPERTY_GROUP,
+        obj.addProperty("App::PropertyLinkGlobal", "Unreachable", PROPERTY_GROUP,
                         "The markers of the locations the machine cannot reach")
 
         obj.addProperty("App::PropertyBool", "Cut", PROPERTY_GROUP,
@@ -113,9 +115,9 @@ class ObjectSimulation(object):
                         "How many locations so far had the shank or the holder in material still there")
         obj.addProperty("App::PropertyVector", "FirstGouge", PROPERTY_GROUP,
                         "Where the first of them was, in the frame of the part")
-        obj.addProperty("App::PropertyLink", "Surface", PROPERTY_GROUP,
+        obj.addProperty("App::PropertyLinkGlobal", "Surface", PROPERTY_GROUP,
                         "What is left of the stock, as a mesh of the exposed faces of its voxels")
-        obj.addProperty("App::PropertyLink", "GougeMarker", PROPERTY_GROUP,
+        obj.addProperty("App::PropertyLinkGlobal", "GougeMarker", PROPERTY_GROUP,
                         "The marker of the first gouge")
         for name in ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
                      "Report", "Tool", "Holder", "Workpiece", "Unreachable", "RemovedVolume", "Gouges",
@@ -386,6 +388,7 @@ class ObjectSimulation(object):
             #unless told to carry it, and then the stock sat at the origin while the cut did not
             link.LinkTransform = True
             link.Label = "%s on the machine" % target.Label
+            link.purgeTouched()
             links.append(link)
         for stale in existing.values():
             obj.Document.removeObject(stale.Name)
@@ -413,6 +416,7 @@ class ObjectSimulation(object):
                 view.PointSize = 6.0
             obj.Unreachable = marker
         marker.Shape = Part.makeCompound([Part.Vertex(p) for p in points])
+        marker.purgeTouched()
 
     # ---------------------------------------------------------------- the cut
 
@@ -555,6 +559,7 @@ class ObjectSimulation(object):
                 view.ShapeColor = (0.9, 0.75, 0.3)
                 view.Lighting = "One side"
         surface.Mesh = Mesh.Mesh(facets)
+        surface.purgeTouched()
         self._cut_since_refresh = 0
 
     def removeSurface(self, obj):
@@ -583,6 +588,7 @@ class ObjectSimulation(object):
                 view.PointSize = 10.0
             obj.GougeMarker = marker
         marker.Shape = Part.Vertex(obj.FirstGouge)
+        marker.purgeTouched()
 
     # ---------------------------------------------------------------- the picture
 
@@ -602,6 +608,8 @@ class ObjectSimulation(object):
             q = self.configurationAt(obj, step)
             if q is not None:
                 machine_object.Configuration = q
+                #set from here rather than by the machine's own recompute: the touch is purged
+                machine_object.purgeTouched()
         else:
             self.placeToolFrame(obj, step)
         if obj.Cut:
@@ -628,6 +636,7 @@ class ObjectSimulation(object):
                 hang = model.assembly_length_mm
         frame = self.toolHolderPart(obj)
         frame.Placement = FreeCAD.Placement(tip + axis * hang, FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), axis))
+        frame.purgeTouched()
 
     def showTool(self, obj, operation_index):
         """The tool of that operation at the mount: the bit's own solid when it has one, else a cylinder."""
@@ -674,6 +683,8 @@ class ObjectSimulation(object):
         holder.Shape = Part.makeCylinder(model.holder_radius_mm, model.holder_length_mm)
         holder.Placement = FreeCAD.Placement(FreeCAD.Vector(0, 0, -model.holder_length_mm),
                                              FreeCAD.Rotation())
+        tool.purgeTouched()
+        holder.purgeTouched()
         self._shown_operation = operation_index
 
     def onChanged(self, obj, prop):
@@ -690,6 +701,10 @@ class ObjectSimulation(object):
 
     def onDocumentRestored(self, obj):
         self.forget()
+        machine.globalise(obj, {
+            "Tool": "App::PropertyLinkGlobal", "Holder": "App::PropertyLinkGlobal",
+            "Workpiece": "App::PropertyLinkListGlobal", "Unreachable": "App::PropertyLinkGlobal",
+            "Surface": "App::PropertyLinkGlobal", "GougeMarker": "App::PropertyLinkGlobal"})
 
 
 class ViewProviderSimulation(object):

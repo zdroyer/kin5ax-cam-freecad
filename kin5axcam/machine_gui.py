@@ -13,6 +13,11 @@ and pause on a timer, a step either way, run to the end, and the report of the
 solve. It moves ``Step`` of the simulation and nothing else; the simulation
 moves the machine.
 
+**Pause on a collision or a gouge** stops the playback where the machine first
+meets itself or the tool first drags its shank through material - at the start
+of such a stretch, not at every location of it, so that pressing play again
+carries on rather than stopping on the spot.
+
 A tick of the player passes a **turn in place** - a run of locations whose tip
 does not move, which is the tool reorienting at one point: the swing of a lead
 angle at the end of a pass, or the solver's way through a singular direction
@@ -212,6 +217,15 @@ class Player(object):
         speed.addWidget(self.rate)
         layout.addLayout(speed)
 
+        self.pauseOnTrouble = QtGui.QCheckBox(
+            translate("Kin5axMachine", "Pause on a collision or a gouge"), self.form)
+        self.pauseOnTrouble.setChecked(True)
+        self.pauseOnTrouble.setToolTip(translate(
+            "Kin5axMachine", "Stop the playback where the machine first meets itself or the tool "
+            "first drags its shank through material - at the start of such a stretch, not at every "
+            "location of it"))
+        layout.addWidget(self.pauseOnTrouble)
+
         self.everyLocation = QtGui.QCheckBox(translate("Kin5axMachine", "Every location"), self.form)
         self.everyLocation.setToolTip(translate(
             "Kin5axMachine", "Draw every location, the ones of a turn in place too; off, a tick "
@@ -247,7 +261,27 @@ class Player(object):
         #a step in progress: a tick that arrives while one is being drawn is dropped, never nested
         self._busy = False
         self._passed = 0                    #locations passed in one go by the last tick
+        self._gouges = int(getattr(sim, "Gouges", 0) or 0)
+        self._in_trouble = False            #the location drawn last met something
         self.describe()
+
+    def trouble(self):
+        """What is wrong at the location shown, when it is the first such location of a stretch.
+
+        A run of colliding locations stops the playback once, at its start, and
+        a gouge stops it when the count goes up - not at every location after it.
+        """
+        sim = self.simulation
+        reasons = []
+        colliding = bool(list(getattr(sim, "Collided", [])))
+        if colliding and not self._in_trouble:
+            reasons.append(translate("Kin5axMachine", "the machine meets itself"))
+        gouges = int(getattr(sim, "Gouges", 0) or 0)
+        if gouges > self._gouges:
+            reasons.append(translate("Kin5axMachine", "the shank or the holder is in the material"))
+        self._gouges = gouges
+        self._in_trouble = colliding
+        return ", ".join(reasons)
 
     def tipOf(self, step):
         tips = self.simulation.Tips
@@ -378,6 +412,14 @@ class Player(object):
         following = self.nextToDraw(self.slider.value())
         self._passed = following - self.slider.value()
         self.slider.setValue(following)
+        if self.pauseOnTrouble.isChecked():
+            why = self.trouble()
+            if why:
+                self.pause()
+                self.where.setText(self.where.text() + "\n"
+                                   + translate("Kin5axMachine", "paused: %s") % why)
+        else:
+            self.trouble()                  #the counts move on either way
 
     def getStandardButtons(self):
         return QtGui.QDialogButtonBox.Close

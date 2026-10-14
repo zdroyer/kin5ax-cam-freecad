@@ -647,22 +647,27 @@ class ObjectSimulation(object):
         machine_object = obj.Machine
         if machine_object is None:
             return None
-        collided = []
+        collided, solids = [], []
         configuration = None
         if not nothing and step < len(obj.Statuses) and obj.Statuses[step] == kin5ax.COLLISION:
             try:
-                configuration, collided = self.collisionAt(obj, step)
+                configuration, collided, solids = self.collisionAt(obj, step)
             except Exception as problem:
                 FreeCAD.Console.PrintWarning("kin5axcam: what met at location %d cannot be shown: %s\n"
                                              % (step + 1, problem))
         if list(obj.Collided) != collided:
             obj.Collided = collided
-            machine_object.Proxy.highlight(machine_object, collided)
-            self.paintTool(obj, collided)
+            #the pairs are what a reader wants; what is painted is the single solids they are made of
+            machine_object.Proxy.highlight(machine_object, solids)
+            self.paintTool(obj, solids)
         return configuration
 
     def collisionAt(self, obj, step):
-        """Where the machine would have to be for that location, and which solids meet there.
+        """Where the machine would have to be for that location, what meets there and which solids.
+
+        Three things: the configuration, a line per pair for a reader ("C and
+        Tool holder"), and the names of the single solids those pairs are made
+        of, which is what can be painted.
 
         The location has no solution, so the configurations are asked for again
         with the collision check off; the one nearest the pose shown before it is
@@ -671,11 +676,11 @@ class ObjectSimulation(object):
         operations = self.operations(obj)
         index = obj.StepOperations[step] if step < len(obj.StepOperations) else 0
         if index >= len(operations):
-            return None, []
+            return None, [], []
         options = self.options(obj)
         model = solve.tool_model_of(operations[index], options)
         if model is None:
-            return None, []
+            return None, [], []
         scale = options.unit_in_mm
         tip = obj.Tips[3 * step:3 * step + 3]
         axis = obj.Axes[3 * step:3 * step + 3]
@@ -687,7 +692,7 @@ class ObjectSimulation(object):
         try:
             configurations, _ = chain.solve_location([c / scale for c in point], axis, settings, tool)
             if not configurations:
-                return None, []
+                return None, [], []
             shown = list(obj.Machine.Configuration) or None
             if shown and len(shown) == kin5ax.AXES:
                 configurations.sort(key=lambda q: sum((q[i] - shown[i]) ** 2 for i in range(kin5ax.AXES)))
@@ -696,17 +701,29 @@ class ObjectSimulation(object):
             met = chain.check_collisions(tool)
         finally:
             tool.close()
-        return configuration, [pair.describe().rsplit(":", 1)[0] for pair in met]
+        solids = []
+        for pair in met:
+            for name in (pair.first, pair.second):
+                if name not in solids:
+                    solids.append(name)
+        return configuration, [pair.describe().rsplit(":", 1)[0] for pair in met], solids
 
-    def paintTool(self, obj, collided):
-        """The tool and its holder red when a pair of that location names them, as they were otherwise."""
-        named = " ".join(collided)
-        for owned, normal, word in ((obj.Tool, (0.85, 0.85, 0.9), "the tool"),
-                                    (obj.Holder, (0.4, 0.4, 0.45), "the shank or the holder")):
+    def paintTool(self, obj, solids):
+        """The tool and its holder in the colliding colour when the report named them, as they were otherwise.
+
+        The two are named by the library as "the tool" and "the shank or the
+        holder"; the holder of the picture is painted for either, since it is
+        drawn as one piece with the shank.
+        """
+        named = set(solids or ())
+        tool_met = "the tool" in named
+        shank_met = "the shank or the holder" in named
+        for owned, normal, met in ((obj.Tool, (0.85, 0.85, 0.9), tool_met or shank_met),
+                                   (obj.Holder, (0.4, 0.4, 0.45), shank_met)):
             view = getattr(owned, "ViewObject", None) if owned is not None else None
             if view is None:
                 continue
-            colour = machine.COLLIDING if word in named else normal
+            colour = machine.COLLIDING_TOOL if met else normal
             if tuple(view.ShapeColor)[:3] != colour:
                 view.ShapeColor = colour
 

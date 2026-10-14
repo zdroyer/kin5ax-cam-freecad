@@ -298,12 +298,21 @@ class AJobOnAMachine(unittest.TestCase):
             self.assertAlmostEqual(centre[i], point[i] * sim.Machine.UnitInMillimetres, delta=1e-3,
                                    msg="the machine is posed at the location it could not reach")
 
+        #what is painted is the single solids the pairs are made of, not the pairs themselves
+        configuration, pairs, single = sim.Proxy.collisionAt(sim, sim.Step)
+        self.assertEqual(pairs, list(sim.Collided))
+        self.assertGreater(len(single), 0)
+        for name in single:
+            self.assertTrue(any(name in line for line in pairs), "%s is in no pair" % name)
+            self.assertNotIn(" and ", name, "a single solid, not a pair")
+        self.assertTrue(set(single) & set(solids), "and at least one of them is a solid of the machine")
+
         painted = [name for name, (feature, _) in solids.items()
                    if feature.ViewObject is not None
                    and tuple(feature.ViewObject.ShapeColor)[:3] == machine.COLLIDING]
         if painted:
-            for name in painted:
-                self.assertTrue(any(name in line for line in sim.Collided), name)
+            self.assertEqual(sorted(painted), sorted(set(single) & set(solids)),
+                             "every machine solid that met is painted, and no other")
 
         #a location that solves takes the names, and the paint, off again
         solved = [i for i in range(sim.StepCount) if sim.Solved[i]]

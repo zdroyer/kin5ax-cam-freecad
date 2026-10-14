@@ -48,8 +48,11 @@ ZERO = (0.5, 0.5, 0.5)                  #nothing to sweep, nothing to slide
 #the thickness of the disc of a revolute marker, as a fraction of its radius
 DISC_THICKNESS = 0.08
 
-#a solid that met another one, and the colours a branch is painted otherwise
+#a solid of the machine that met another one, the tool or its holder when that is what met - a
+#different red, so that which of the two is which is plain - and the colours a branch is painted
+#otherwise
 COLLIDING = (1.0, 0.1, 0.1)
+COLLIDING_TOOL = (1.0, 0.55, 0.0)
 BRANCH_COLOURS = {kin5ax.PART_TOOL: (0.55, 0.62, 0.75), kin5ax.PART_MATERIAL_HOLDER: (0.75, 0.68, 0.5)}
 
 
@@ -266,9 +269,10 @@ class ObjectMachine(object):
     def highlight(self, obj, names):
         """Paints the solids of those names as colliding and every other one as it was.
 
-        names: whatever a collision report named, the tool's own names among
-        them - those belong to the simulation, which paints its own tool, and
-        are passed over here.
+        names: the names of single solids, as a collision report gives them -
+        not the description of a pair, which names two of them and matches
+        nothing here. The tool's own names may be among them; they belong to the
+        simulation, which paints its own tool, and are passed over.
         """
         wanted = set(names or ())
         for name, (feature, part) in self.solids(obj).items():

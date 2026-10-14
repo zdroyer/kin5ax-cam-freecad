@@ -257,13 +257,16 @@ the machine cannot tilt that far.
 **And it is shown.** A location the machine cannot reach *because it would collide* is not skipped
 over: the machine is posed at a configuration that puts the tool where that location asks — the
 collision check off, the configuration nearest the pose before it, which is the one it would have
-swung into — and the two solids that meet there are painted red, the tool and its holder among them.
-`Collided` names them for that location and the player says *what meets here*. Stepping to a location
-that solves takes the paint off.
+swung into — and the two solids that meet there are painted: a solid of the machine **red**, the tool
+or its holder **orange**, so which of the two is which needs no reading. `Collided` names the pairs
+for that location and the player says *what meets here*. Stepping to a location that solves takes the
+paint off.
 
 **The player** is the task panel the simulate command opens: a slider over the locations, play and
 pause at a rate you set, a step either way, first and last, and the report. It moves `Step` and
-nothing else. A tick passes a **turn in place** — a run of locations whose tip does not move, which
+nothing else. **Pause on a collision or a gouge**, on by default, stops the playback where the
+machine first meets itself or the tool first drags its shank through material — at the start of such
+a stretch, not at every location of it, so that pressing play again carries on. A tick passes a **turn in place** — a run of locations whose tip does not move, which
 is the tool reorienting at one point: the swing of a lead angle at the end of a pass, or the solver's
 way through a singular direction of a wrist — in one go and says how many it passed; the cut is made
 at every one of them either way. *Every location* draws them all.

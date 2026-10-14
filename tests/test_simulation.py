@@ -103,10 +103,10 @@ class AJobOnAMachine(unittest.TestCase):
         real = self.job.Stock.Shape.BoundBox
         self.assertAlmostEqual(real.XMin, linked.XMin, delta=1e-6, msg="the link is where the stock is")
         self.assertAlmostEqual(real.ZMax, linked.ZMax, delta=1e-6)
-        cloud = sim.Cloud.Points.BoundBox
+        mesh = sim.Surface.Mesh.BoundBox
         voxel = sim.Proxy.voxelSize(sim)
-        self.assertAlmostEqual(real.XMin, cloud.XMin, delta=voxel, msg="and so is the cloud")
-        self.assertAlmostEqual(real.YMax, cloud.YMax, delta=voxel)
+        self.assertAlmostEqual(real.XMin, mesh.XMin, delta=voxel, msg="and so is the mesh")
+        self.assertAlmostEqual(real.YMax, mesh.YMax, delta=voxel)
 
     def test_a_change_of_machine_moves_the_whole_picture(self):
         """Take the machine away and the tool, the cloud and the markers come along, not stay behind."""
@@ -124,7 +124,7 @@ class AJobOnAMachine(unittest.TestCase):
                               if o.Name.startswith(sim.Name)], "nor in the material frame")
         self.assertIsNotNone(sim.ToolFrame)
         self.assertIn(sim.Tool, sim.ToolFrame.Group)
-        self.assertIn(sim.Cloud, sim.PartFrame.Group)
+        self.assertIn(sim.Surface, sim.PartFrame.Group)
         self.assertEqual([], sim.Workpiece)
 
         #and back again
@@ -199,11 +199,15 @@ class AJobOnAMachine(unittest.TestCase):
         """The ball of the tool takes material off the top of the box; what is left is a cloud."""
         sim = self.simulation
         self.assertTrue(sim.Cut)
-        self.assertIsNotNone(sim.Cloud, "the stock as points, from the start")
-        self.assertIn(sim.Cloud, self.machine.Material.Group)
-        whole = sim.Cloud.Points.CountPoints
+        self.assertIsNotNone(sim.Surface, "the stock as a mesh of voxel faces, from the start")
+        self.assertIn(sim.Surface, self.machine.Material.Group)
+        whole = sim.Surface.Mesh.CountFacets
         self.assertGreater(whole, 0)
+        self.assertEqual(0, whole % 2, "two triangles per face")
         self.assertEqual(0.0, sim.RemovedVolume)
+        #the whole stock is a box: its mesh has exactly the faces of its outside
+        nx, ny, nz = sim.Proxy._block.dimensions()
+        self.assertEqual(2 * 2 * (nx * ny + ny * nz + nx * nz), whole)
 
         sim.Step = sim.StepCount - 1
         self.assertGreater(sim.RemovedVolume, 0.0, "the path went through the stock")
@@ -211,7 +215,15 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertLess(sim.RemovedVolume, 0.5 * stock, "but took far from all of it")
         self.assertEqual(0, sim.Gouges, "the holder stayed above the box")
         self.assertIsNone(sim.GougeMarker)
-        self.assertNotEqual(whole, sim.Cloud.Points.CountPoints, "the surface changed")
+        self.assertNotEqual(whole, sim.Surface.Mesh.CountFacets, "the surface changed")
+        #the mesh starts where the stock starts; it may end up to a voxel past it, the block being a
+        #whole number of voxels rounded up
+        bound = sim.Surface.Mesh.BoundBox
+        stock = self.job.Stock.Shape.BoundBox
+        voxel = sim.Proxy.voxelSize(sim)
+        self.assertAlmostEqual(stock.XMin, bound.XMin, delta=1e-6, msg="the mesh is where the stock is")
+        self.assertGreaterEqual(bound.ZMax + 1e-6, stock.ZMax)
+        self.assertLess(bound.ZMax, stock.ZMax + voxel + 1e-6)
 
     def test_the_cut_is_the_same_whether_a_step_is_reached_forwards_or_after_going_back(self):
         sim = self.simulation
@@ -238,7 +250,7 @@ class AJobOnAMachine(unittest.TestCase):
         sim = self.simulation
         sim.Cut = False
         self.document.recompute()
-        self.assertIsNone(sim.Cloud)
+        self.assertIsNone(sim.Surface)
         sim.Step = sim.StepCount - 1
         self.assertEqual(0.0, sim.RemovedVolume)
 
@@ -320,8 +332,8 @@ class AJobWithNoMachine(unittest.TestCase):
 
     def test_the_stock_is_cut_in_the_frame_of_the_part(self):
         sim = self.simulation
-        self.assertIsNotNone(sim.Cloud)
-        self.assertIn(sim.Cloud, sim.PartFrame.Group)
+        self.assertIsNotNone(sim.Surface)
+        self.assertIn(sim.Surface, sim.PartFrame.Group)
         self.assertEqual(FreeCAD.Vector(0, 0, 0), sim.PartFrame.Placement.Base)
         sim.Step = sim.StepCount - 1
         self.assertGreater(sim.RemovedVolume, 0.0)

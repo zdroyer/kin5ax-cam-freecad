@@ -270,9 +270,11 @@ question of which machine.
 **The cut.** With `Cut` on — it is, by default — the stock of the job becomes a block of voxels in
 the library, in the frame of the material, and every step cuts it with the tool of the step's
 operation: the ball or the flat end takes material off, and anything the shank or the holder meets
-that is still there is a **gouge**. What is left is a **point cloud** under the material part, one
-point per surface voxel, redrawn every `RefreshEvery` steps; `RemovedVolume` and `Gouges` are
-properties, the first gouge is an orange marker, and the player shows both under the slider.
+that is still there is a **gouge**. What is left is a **mesh of the voxels** under the material part
+— the exposed faces only, which the library works out (`k5_material_surface_triangles`): every side
+of a material voxel with a removed voxel or the outside behind it, and not one face a renderer could
+not see — redrawn every `RefreshEvery` steps; `RemovedVolume` and `Gouges` are properties, the first
+gouge is an orange marker, and the player shows both under the slider.
 `VoxelSize` is a hundred and fiftieth of the stock's longest side unless set — a 100 mm stock cuts in
 0.67 mm voxels.
 
@@ -284,9 +286,9 @@ voxels cannot be uncut; scrubbing the slider back is a recut up to there, which 
 sizes. And the cut needs the solved paths of the library, which live only while the document is
 open: a reopened document still scrubs the machine, but **recompute the simulation to cut again**.
 
-What is not here yet: a surface rather than points (a mesh of cube faces, then marching cubes in the
-library), the sweep of the tool between two locations, and the difference between what is left and
-the model, which is what a finish pass is judged by.
+What is not here yet: a smooth surface (marching cubes in the library, in place of the voxel faces),
+the sweep of the tool between two locations, and the difference between what is left and the model,
+which is what a finish pass is judged by.
 
 ## Installing it
 
@@ -442,7 +444,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-126 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+134 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

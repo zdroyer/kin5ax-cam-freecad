@@ -300,6 +300,15 @@ class TheCutting(unittest.TestCase):
             self.assertLess(len(surface) // 3, nx * ny * nz, "the inside is not surface")
             self.assertEqual(0, len(surface) % 3)
 
+    def test_the_exposed_faces_of_a_whole_block_are_its_outside(self):
+        with kin5ax.Material((0.10, 0.05, 0.02), 0.01, (0.0, 0.0, 0.0)) as block:
+            nx, ny, nz = block.dimensions()
+            triangles = block.surface_triangles()
+            self.assertEqual(18 * 2 * (nx * ny + ny * nz + nx * nz), len(triangles))
+            for i in range(0, len(triangles), 3):
+                self.assertGreaterEqual(triangles[i], -1e-12)
+                self.assertLessEqual(triangles[i], nx * 0.01 + 1e-12)
+
     def test_a_block_that_cannot_be_made_is_refused(self):
         with self.assertRaises(kin5ax.Kin5axError):
             kin5ax.Material((0.0, 0.1, 0.05), 0.005, (0.0, 0.0, 0.0))

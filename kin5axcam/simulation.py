@@ -20,10 +20,11 @@ location, leaning the way the operation said. This is the cutting simulation
 FreeCAD's own cannot do, and it needs no machine file at all.
 
 With ``Cut`` on, the stock of the job becomes a block of voxels in the library
-and every step cuts it: the surface of what is left is a point cloud in the
-frame of the material, the removed volume and the gouges - the shank or the
-holder in material that was still there - are properties, and the first gouge
-is a marker. The cut is rudimentary and says so: the tool is stamped once per
+and every step cuts it: what is left is a mesh of the exposed voxel faces in
+the frame of the material - the library says which faces are exposed, so no
+face a renderer could not see is drawn - the removed volume and the gouges -
+the shank or the holder in material that was still there - are properties, and
+the first gouge is a marker. The cut is rudimentary and says so: the tool is stamped once per
 location, so the interpolation is made as dense as the voxels. Stepping
 backwards starts the cut again from a whole block. The cut needs the solved
 paths of the library, which live only while the document is open: after a
@@ -112,13 +113,13 @@ class ObjectSimulation(object):
                         "How many locations so far had the shank or the holder in material still there")
         obj.addProperty("App::PropertyVector", "FirstGouge", PROPERTY_GROUP,
                         "Where the first of them was, in the frame of the part")
-        obj.addProperty("App::PropertyLink", "Cloud", PROPERTY_GROUP,
-                        "The surface of what is left of the stock, as points")
+        obj.addProperty("App::PropertyLink", "Surface", PROPERTY_GROUP,
+                        "What is left of the stock, as a mesh of the exposed faces of its voxels")
         obj.addProperty("App::PropertyLink", "GougeMarker", PROPERTY_GROUP,
                         "The marker of the first gouge")
         for name in ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
                      "Report", "Tool", "Holder", "Workpiece", "Unreachable", "RemovedVolume", "Gouges",
-                     "FirstGouge", "Cloud", "GougeMarker", "ToolFrame", "PartFrame"):
+                     "FirstGouge", "Surface", "GougeMarker", "ToolFrame", "PartFrame"):
             obj.setEditorMode(name, 1)
         obj.Cut = True
         obj.VoxelSize = 0.0
@@ -318,7 +319,7 @@ class ObjectSimulation(object):
         finally:
             tool.close()
 
-    OWNED = ("Tool", "Holder", "Unreachable", "Cloud", "GougeMarker", "ToolFrame", "PartFrame")
+    OWNED = ("Tool", "Holder", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
 
     def clearPicture(self, obj):
         """Takes every object this simulation put in the document out again.
@@ -439,12 +440,12 @@ class ObjectSimulation(object):
         obj.RemovedVolume = 0.0
         obj.Gouges = 0
         if not obj.Cut or not self._runs:
-            self.removeCloud(obj)
+            self.removeSurface(obj)
             return
         box = self.stockBox(obj)
         if box is None:
             obj.Report = obj.Report + "\nno stock in the job to cut"
-            self.removeCloud(obj)
+            self.removeSurface(obj)
             return
         unit = self.unit(obj)
         voxel = self.voxelSize(obj)
@@ -455,7 +456,7 @@ class ObjectSimulation(object):
         except kin5ax.Kin5axError as problem:
             obj.Report = obj.Report + "\nthe stock cannot be cut: %s" % problem
             self._block = None
-            self.removeCloud(obj)
+            self.removeSurface(obj)
             return
         self._cuts = []
         if obj.Machine is not None:
@@ -475,7 +476,7 @@ class ObjectSimulation(object):
                 cut.tool = tool             #kept alive with the simulation, closed with it
                 self._cuts.append(cut)
         self._cut_to = -1
-        self.refreshCloud(obj)
+        self.refreshSurface(obj)
 
     def cutTo(self, obj, step):
         """Takes the cut up to that step, from a whole block again when the step is behind the cut."""
@@ -525,36 +526,39 @@ class ObjectSimulation(object):
         self.markGouge(obj, first_point is not None)
         finished = step >= obj.StepCount - 1
         if self._cut_since_refresh >= max(obj.RefreshEvery, 1) or finished or advanced == 0:
-            self.refreshCloud(obj)
+            self.refreshSurface(obj)
 
-    def refreshCloud(self, obj):
-        """The surface of what is left of the block, as points at the centres of its voxels."""
-        import Points
+    def refreshSurface(self, obj):
+        """What is left of the block as a mesh: the exposed faces of its voxels, from the library.
+
+        The library hands over the faces as triangles already wound outwards -
+        every side of a material voxel with nothing behind it, and no other -
+        so the only work here is handing them to the mesh.
+        """
+        import Mesh
 
         if self._block is None:
             return
         unit = self.unit(obj)
-        half = 0.5 * self._block.voxel * unit
-        surface = self._block.surface()
-        points = [FreeCAD.Vector(surface[3 * i] * unit + half, surface[3 * i + 1] * unit + half,
-                                 surface[3 * i + 2] * unit + half) for i in range(len(surface) // 3)]
-        cloud = obj.Cloud
-        if cloud is None:
-            cloud = obj.Document.addObject("Points::Feature", obj.Name + "Cloud")
-            cloud.Label = "What is left of the stock"
-            self.materialPart(obj).addObject(cloud)
-            obj.Cloud = cloud
-            view = getattr(cloud, "ViewObject", None)
+        t = self._block.surface_triangles()
+        facets = [((t[i] * unit, t[i + 1] * unit, t[i + 2] * unit),
+                   (t[i + 3] * unit, t[i + 4] * unit, t[i + 5] * unit),
+                   (t[i + 6] * unit, t[i + 7] * unit, t[i + 8] * unit)) for i in range(0, len(t), 9)]
+        surface = obj.Surface
+        if surface is None:
+            surface = obj.Document.addObject("Mesh::Feature", obj.Name + "Surface")
+            surface.Label = "What is left of the stock"
+            self.materialPart(obj).addObject(surface)
+            obj.Surface = surface
+            view = getattr(surface, "ViewObject", None)
             if view is not None:
-                view.PointSize = 3.0
                 view.ShapeColor = (0.9, 0.75, 0.3)
-        kept = Points.Points()
-        kept.addPoints(points)
-        cloud.Points = kept
+                view.Lighting = "One side"
+        surface.Mesh = Mesh.Mesh(facets)
         self._cut_since_refresh = 0
 
-    def removeCloud(self, obj):
-        for name in ("Cloud", "GougeMarker"):
+    def removeSurface(self, obj):
+        for name in ("Surface", "GougeMarker"):
             marker = getattr(obj, name)
             if marker is not None:
                 obj.Document.removeObject(marker.Name)

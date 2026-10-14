@@ -380,6 +380,8 @@ def _declare(lib):
     lib.k5_material_volumes.argtypes = [_material_t, _double_p, _double_p]
     lib.k5_material_surface.restype = ctypes.c_int
     lib.k5_material_surface.argtypes = [_material_t, _double_p, ctypes.c_size_t, _size_p]
+    lib.k5_material_surface_triangles.restype = ctypes.c_int
+    lib.k5_material_surface_triangles.argtypes = [_material_t, _double_p, ctypes.c_size_t, _size_p]
     lib.k5_simulation_create.restype = ctypes.c_int
     lib.k5_simulation_create.argtypes = [_chain_t, _tool_t, _path_t, _material_t,
                                          ctypes.POINTER(_simulation_t)]
@@ -809,6 +811,24 @@ class Material(object):
         out = (ctypes.c_double * (3 * count.value))()
         _check(self._lib, self._lib.k5_material_surface(self._handle, out, 3 * count.value,
                                                         ctypes.byref(count)), "k5_material_surface")
+        return out
+
+    def surface_triangles(self):
+        """The exposed faces of what is left as triangles, a flat ctypes array of 18 doubles per face.
+
+        Two triangles per face, wound to face outwards, three corners each: what
+        a host builds a mesh from without looking inside. The count of faces is
+        len(array) // 18.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_material_surface_triangles(self._handle, None, 0, ctypes.byref(count)),
+               "k5_material_surface_triangles")
+        if not count.value:
+            return (ctypes.c_double * 0)()
+        out = (ctypes.c_double * (18 * count.value))()
+        _check(self._lib, self._lib.k5_material_surface_triangles(self._handle, out, 18 * count.value,
+                                                                  ctypes.byref(count)),
+               "k5_material_surface_triangles")
         return out
 
     def close(self):

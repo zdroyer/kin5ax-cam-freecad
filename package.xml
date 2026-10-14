@@ -14,8 +14,8 @@
   <date>2026-10-14</date>
   <maintainer email="zdroyer@gmail.com">Przemysław Zdroik</maintainer>
   <license file="LICENSE">MIT</license>
-  <url type="repository" branch="main">https://github.com/zdroyer/kin5ax-cam-freecad</url>
-  <url type="readme">https://github.com/zdroyer/kin5ax-cam-freecad/blob/main/README.md</url>
+  <url type="repository" branch="releases">https://github.com/zdroyer/kin5ax-cam-freecad</url>
+  <url type="readme">https://github.com/zdroyer/kin5ax-cam-freecad/blob/releases/README.md</url>
   <url type="bugtracker">https://github.com/zdroyer/kin5ax-cam-freecad/issues</url>
   <icon>Resources/icons/Surface5Axis.svg</icon>
   <freecadmin>1.0</freecadmin>

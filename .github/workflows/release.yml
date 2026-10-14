@@ -197,22 +197,41 @@ jobs:
             -o "kin5ax-cam-freecad-$TAG.zip"
           unzip -l "kin5ax-cam-freecad-$TAG.zip" | tail -3
 
+      # A draft already there is reused rather than refused, so a run that failed half way can be
+      # started again; a published release is still refused, since replacing one is a decision.
+      # The body is this version's section of the changelog, not the whole file.
       - name: Create the draft release and attach it
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
         run: |
+          python - <<'PY' > release-notes.md
+          import os, re
+          version = os.environ["TAG"][1:]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          # from this version's heading to the next one, which is the part that is about it
+          section = re.search(r"^## \[%s\].*?$(.*?)(?=^## \[|\Z)" % re.escape(version),
+                              text, re.M | re.S)
+          print((section.group(1).strip() if section else "") or "See CHANGELOG.md.")
+          PY
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "A release $TAG exists already. Delete it, or choose another tag."
-            exit 1
+            if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)" = "true" ]; then
+              echo "A draft $TAG is already there; this run will fill it again."
+            else
+              echo "::error::$TAG is published already. Delete that release, or choose another tag."
+              exit 1
+            fi
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "kin5axcam $TAG" \
+              --notes-file release-notes.md \
+              --draft \
+              $PRERELEASE
           fi
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "kin5axcam $TAG" \
-            --notes-file CHANGELOG.md \
-            --draft \
-            ${{ inputs.prerelease && '--prerelease' || '' }}
           gh release upload "$TAG" "kin5ax-cam-freecad-$TAG.zip" \
             --repo "$GITHUB_REPOSITORY" --clobber
 

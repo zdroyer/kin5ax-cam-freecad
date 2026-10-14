@@ -205,6 +205,24 @@ class Player(object):
         speed.addWidget(self.rate)
         layout.addLayout(speed)
 
+        #the joint markers of the machine: shown or not, larger or smaller
+        if sim.Machine is not None:
+            joints = QtGui.QHBoxLayout()
+            self.showJoints = QtGui.QCheckBox(translate("Kin5axMachine", "Joints"), self.form)
+            self.showJoints.setChecked(bool(sim.Machine.ShowJoints))
+            self.showJoints.setToolTip(translate(
+                "Kin5axMachine", "Every joint as a disc sector or a box the size of its value: "
+                "magenta positive, cyan negative"))
+            self.showJoints.stateChanged.connect(self.toggleJoints)
+            joints.addWidget(self.showJoints)
+            self.shrink = QtGui.QPushButton(translate("Kin5axMachine", "Smaller"), self.form)
+            self.expand = QtGui.QPushButton(translate("Kin5axMachine", "Larger"), self.form)
+            self.shrink.clicked.connect(lambda: self.resizeJoints(0.8))
+            self.expand.clicked.connect(lambda: self.resizeJoints(1.25))
+            joints.addWidget(self.shrink)
+            joints.addWidget(self.expand)
+            layout.addLayout(joints)
+
         self.report = QtGui.QPlainTextEdit(self.form)
         self.report.setReadOnly(True)
         self.report.setPlainText(sim.Report)
@@ -262,6 +280,18 @@ class Player(object):
 
     def goto(self, value):
         self.slider.setValue(max(0, min(value, self.slider.maximum())))
+
+    def toggleJoints(self, state):
+        machine_object = self.simulation.Machine
+        if machine_object is not None:
+            machine_object.ShowJoints = bool(state)
+            FreeCADGui.updateGui()
+
+    def resizeJoints(self, factor):
+        machine_object = self.simulation.Machine
+        if machine_object is not None:
+            machine_object.JointSize = max(1.0, machine_object.JointSize * factor)
+            FreeCADGui.updateGui()
 
     def toggle(self):
         if self.timer.isActive():

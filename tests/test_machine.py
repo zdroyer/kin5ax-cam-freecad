@@ -124,6 +124,63 @@ class AMachineInADocument(unittest.TestCase):
                         "the table turns about its own axis, so its origin stays put")
         self.assertGreater(abs(self.machine.Material.Placement.Rotation.Angle), 0.4, "but it turned")
 
+    def test_every_joint_has_a_marker_and_no_terminal_has_one(self):
+        with kin5ax.Chain(CHAIN) as chain:
+            tool_joints = len(chain.frames(kin5ax.PART_TOOL)) - 1
+            material_joints = len(chain.frames(kin5ax.PART_MATERIAL_HOLDER)) - 1
+        self.assertEqual(tool_joints, len(self.machine.ToolJoints))
+        self.assertEqual(material_joints, len(self.machine.MaterialJoints))
+        self.assertEqual(kin5ax.AXES, tool_joints + material_joints)
+        for index, marker in enumerate(self.machine.ToolJoints):
+            self.assertIn(marker, self.machine.ToolBodies[index].Group, "in the frame of its joint")
+        self.assertGreater(self.machine.JointSize, 0.0, "a size picked from the machine")
+        self.assertTrue(self.machine.ShowJoints)
+
+    def test_a_turning_joint_shows_a_sector_as_wide_as_its_angle_on_the_side_of_its_sign(self):
+        """The links of this model run C, Y, X, Z, A: A is the last link and the second segment of
+        the tool branch. A sector about Z from zero to the angle lies on +Y for a positive angle and
+        on -Y for a negative one; its volume says how wide it is."""
+        import math
+
+        size = self.machine.JointSize
+        thickness = 0.08 * size
+        a_marker = self.machine.ToolJoints[1]
+        self.machine.Configuration = [0.0, 0.0, 0.0, 0.0, math.radians(60.0)]
+        sector = [s for s in a_marker.Shape.Solids if s.Volume > 0.5 * (math.pi * size * size * thickness / 6.0)]
+        self.assertEqual(1, len(sector), "a wedge beside the dial")
+        self.assertAlmostEqual(math.pi * size * size * thickness / 6.0, sector[0].Volume,
+                               delta=0.02 * math.pi * size * size * thickness)
+        self.assertGreater(sector[0].BoundBox.YMax, 0.5 * size, "a positive angle sweeps towards +Y")
+        self.assertGreater(sector[0].BoundBox.YMin, -1e-6)
+
+        self.machine.Configuration = [0.0, 0.0, 0.0, 0.0, math.radians(-60.0)]
+        sector = [s for s in a_marker.Shape.Solids if s.Volume > 0.5 * (math.pi * size * size * thickness / 6.0)]
+        self.assertLess(sector[0].BoundBox.YMin, -0.5 * size, "a negative one towards -Y")
+        self.assertLess(sector[0].BoundBox.YMax, 1e-6)
+
+        self.machine.Configuration = [0.0] * 5
+        self.assertEqual(1, len(a_marker.Shape.Solids), "the dial alone at zero")
+
+    def test_a_sliding_joint_shows_a_box_as_long_as_its_travel(self):
+        """Z is the first segment of the tool branch, link index 3, in metres in the file."""
+        size = self.machine.JointSize
+        z_marker = self.machine.ToolJoints[0]
+        self.machine.Configuration = [0.0, 0.0, 0.0, 0.12, 0.0]
+        box = max(z_marker.Shape.Solids, key=lambda s: s.Volume)
+        self.assertAlmostEqual(120.0, box.BoundBox.ZLength, delta=1e-6, msg="120 mm of travel")
+        self.assertAlmostEqual(size, box.BoundBox.XLength, delta=1e-6)
+        self.assertAlmostEqual(0.0, box.BoundBox.ZMin, delta=1e-6, msg="from zero up")
+        self.machine.Configuration = [0.0, 0.0, 0.0, -0.05, 0.0]
+        box = max(z_marker.Shape.Solids, key=lambda s: s.Volume)
+        self.assertAlmostEqual(50.0, box.BoundBox.ZLength, delta=1e-6)
+        self.assertAlmostEqual(-50.0, box.BoundBox.ZMin, delta=1e-6, msg="from the travel up to zero")
+
+    def test_the_markers_follow_the_size_they_are_given(self):
+        self.machine.Configuration = [0.0, 0.0, 0.0, 0.1, 0.5]
+        before = self.machine.ToolJoints[1].Shape.BoundBox.XLength
+        self.machine.JointSize = self.machine.JointSize * 2.0
+        self.assertAlmostEqual(2.0 * before, self.machine.ToolJoints[1].Shape.BoundBox.XLength, delta=1e-6)
+
     def test_the_machine_survives_being_saved_and_opened_again(self):
         self.machine.Configuration = [0.1, 0.05, -0.02, 0.3, 0.5]
         mount = FreeCAD.Vector(self.machine.ToolMount.Placement.Base)

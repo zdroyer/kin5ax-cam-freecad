@@ -13,6 +13,13 @@ chain and in the units of its file - and every part is placed by the frames
 kin5ax computes for that configuration. Nothing here knows about a path; that
 is the simulation, which drives this.
 
+Every joint shows its value the way the application of kin5ax draws it: a
+revolute joint as a sector of a disc swept from zero to the angle it stands at,
+a prismatic one as a box as long as its slide, magenta for a positive value and
+cyan for a negative one, in the frame of the joint whose Z is its axis.
+``JointSize`` is the radius of the disc and the side of the box, picked from
+the size of the machine unless set; ``ShowJoints`` hides them.
+
 Lengths cross from the unit of the chain file into millimetres through
 ``UnitInMillimetres``, 1000 for the metres the shipped machines are in.
 """
@@ -28,6 +35,13 @@ PROPERTY_GROUP = "Kin5axMachine"
 
 #the two branches, in the order their parts are kept
 BRANCHES = ((kin5ax.PART_TOOL, "Tool"), (kin5ax.PART_MATERIAL_HOLDER, "Material"))
+
+#what a joint marker is painted: the sign of the value is the colour
+POSITIVE = (1.0, 0.0, 1.0)              #magenta
+NEGATIVE = (0.0, 1.0, 1.0)              #cyan
+ZERO = (0.5, 0.5, 0.5)                  #nothing to sweep, nothing to slide
+#the thickness of the disc of a revolute marker, as a fraction of its radius
+DISC_THICKNESS = 0.08
 
 
 def placement_of(frame, unit_in_mm):
@@ -57,11 +71,21 @@ class ObjectMachine(object):
         obj.addProperty("App::PropertyFloat", "ArmRadius", PROPERTY_GROUP,
                         "The radius of the arms drawn between the segments, in mm; 0 picks one from "
                         "the size of the machine")
+        obj.addProperty("App::PropertyFloat", "JointSize", PROPERTY_GROUP,
+                        "The radius of the disc a turning joint shows its angle with, and the side of "
+                        "the box a sliding one shows its travel with, in mm; 0 picks one from the "
+                        "size of the machine")
+        obj.addProperty("App::PropertyBool", "ShowJoints", PROPERTY_GROUP,
+                        "Show every joint's value as a disc sector or a box, magenta when positive, "
+                        "cyan when negative")
         for _, name in BRANCHES:
             obj.addProperty("App::PropertyLinkList", name + "Bodies", PROPERTY_GROUP,
                             "The parts holding the boxes of the segments of the %s branch" % name.lower())
             obj.addProperty("App::PropertyLinkList", name + "Arms", PROPERTY_GROUP,
                             "The parts holding the arms from each segment of the %s branch to the next"
+                            % name.lower())
+            obj.addProperty("App::PropertyLinkList", name + "Joints", PROPERTY_GROUP,
+                            "The markers of the joints of the %s branch, one per segment that has one"
                             % name.lower())
         obj.addProperty("App::PropertyLink", "ToolMount", PROPERTY_GROUP,
                         "The part at the tool mount of the machine: a simulation puts the tool in it")
@@ -71,6 +95,8 @@ class ObjectMachine(object):
         obj.ChainFile = chain_file
         obj.UnitInMillimetres = float(unit_in_mm)
         obj.ArmRadius = 0.0
+        obj.JointSize = 0.0
+        obj.ShowJoints = True
         self.build(obj)
 
     #the proxy is pickled into the document, and a handle of the library is not for pickling
@@ -102,6 +128,19 @@ class ObjectMachine(object):
             values = [0.0] * kin5ax.AXES
         return values
 
+    def linkOfSegment(self, chain, part, index):
+        """The index into the links of the chain - and into every q - of the joint of that segment, or None.
+
+        The links run from the material terminal through the base to the tool
+        terminal; the segments of a branch run from the base outwards, and the
+        last of them is the terminal, which has no joint.
+        """
+        material_joints = len(chain.frames(kin5ax.PART_MATERIAL_HOLDER)) - 1
+        tool_joints = len(chain.frames(kin5ax.PART_TOOL)) - 1
+        if part == kin5ax.PART_TOOL:
+            return material_joints + index if index < tool_joints else None
+        return material_joints - 1 - index if index < material_joints else None
+
     def build(self, obj):
         """The parts of the machine, once: boxes and arms for every segment, and the two end frames."""
         document = obj.Document
@@ -109,13 +148,20 @@ class ObjectMachine(object):
         unit = obj.UnitInMillimetres
         chain.set_configuration(self.configuration(obj))
         arm_radius = obj.ArmRadius or self.automaticArmRadius(chain, unit)
+        if not obj.JointSize:
+            obj.JointSize = self.automaticJointSize(chain, unit)
 
         for part, name in BRANCHES:
             frames = chain.frames(part)
-            bodies, arms = [], []
+            bodies, arms, joints = [], [], []
             for index in range(len(frames)):
                 body = document.addObject("App::Part", "%s%sBody" % (obj.Name, name))
                 body.Label = "%s %d" % (name, index + 1)
+                if self.linkOfSegment(chain, part, index) is not None:
+                    marker = document.addObject("Part::Feature", "%s%sJoint" % (obj.Name, name))
+                    marker.Label = "%s %d joint" % (name, index + 1)
+                    body.addObject(marker)
+                    joints.append(marker)
                 for b, (low, high) in enumerate(chain.segment_boxes(part, index)):
                     box = document.addObject("Part::Feature", "%s%sBox" % (obj.Name, name))
                     box.Label = "%s %d box %d" % (name, index + 1, b + 1)
@@ -148,6 +194,7 @@ class ObjectMachine(object):
                 obj.addObject(arm)
             setattr(obj, name + "Bodies", bodies)
             setattr(obj, name + "Arms", arms)
+            setattr(obj, name + "Joints", joints)
 
         mount = document.addObject("App::Part", obj.Name + "ToolMount")
         mount.Label = "Tool mount"
@@ -158,6 +205,11 @@ class ObjectMachine(object):
         obj.ToolMount = mount
         obj.Material = material
         self.pose(obj)
+
+    def automaticJointSize(self, chain, unit):
+        """A tenth of the reach of the machine - what the application of kin5ax draws - and twenty
+        millimetres at the least."""
+        return max(10.0 * self.automaticArmRadius(chain, unit), 20.0)
 
     def automaticArmRadius(self, chain, unit):
         """A hundredth of the reach of the machine, and never less than two millimetres."""
@@ -195,13 +247,77 @@ class ObjectMachine(object):
                 obj.ToolMount.Placement = end
             if part == kin5ax.PART_MATERIAL_HOLDER and obj.Material is not None:
                 obj.Material.Placement = end
+        self.showJoints(obj, chain)
+
+    def showJoints(self, obj, chain):
+        """Every joint marker shaped to the value its joint stands at, and painted by the sign of it."""
+        import Part
+
+        links = chain.links()
+        size = obj.JointSize or self.automaticJointSize(chain, obj.UnitInMillimetres)
+        unit = obj.UnitInMillimetres
+        for part, name in BRANCHES:
+            markers = getattr(obj, name + "Joints", [])
+            for index, marker in enumerate(markers):
+                link_index = self.linkOfSegment(chain, part, index)
+                if link_index is None or link_index >= len(links):
+                    continue
+                link = links[link_index]
+                value = link.value
+                if link.is_revolute:
+                    marker.Shape = self.sector(size, value)
+                else:
+                    marker.Shape = self.slide(size, value * unit)
+                view = getattr(marker, "ViewObject", None)
+                if view is not None:
+                    view.ShapeColor = POSITIVE if value > 1e-9 else NEGATIVE if value < -1e-9 else ZERO
+                    view.Transparency = 30
+                    view.Visibility = bool(obj.ShowJoints)
+
+    @staticmethod
+    def sector(radius, angle_radians):
+        """A sector of a disc swept from zero to the angle, about Z, with a thin full disc under it."""
+        import Part
+
+        thickness = DISC_THICKNESS * radius
+        dial = Part.makeCylinder(0.35 * radius, 0.5 * thickness, FreeCAD.Vector(0, 0, -0.25 * thickness))
+        degrees = math.degrees(angle_radians)
+        if abs(degrees) < 1e-6:
+            return dial
+        sweep = Part.makeCylinder(radius, thickness, FreeCAD.Vector(0, 0, -0.5 * thickness),
+                                  FreeCAD.Vector(0, 0, 1), min(abs(degrees), 360.0))
+        if degrees < 0.0:
+            #from the angle up to zero rather than from zero down: the same sector, turned to start
+            #where the joint stands
+            sweep.rotate(FreeCAD.Vector(), FreeCAD.Vector(0, 0, 1), degrees)
+        return Part.makeCompound([dial, sweep])
+
+    @staticmethod
+    def slide(side, travel_mm):
+        """A box as long as the travel, along Z from zero to it, with a thin square plate at zero."""
+        import Part
+
+        plate = Part.makeBox(1.2 * side, 1.2 * side, 0.04 * side,
+                             FreeCAD.Vector(-0.6 * side, -0.6 * side, -0.02 * side))
+        if abs(travel_mm) < 1e-9:
+            return plate
+        box = Part.makeBox(side, side, abs(travel_mm),
+                           FreeCAD.Vector(-0.5 * side, -0.5 * side, min(0.0, travel_mm)))
+        return Part.makeCompound([plate, box])
 
     def onChanged(self, obj, prop):
-        if prop == "Configuration" and "Restore" not in obj.State and getattr(obj, "ToolMount", None):
+        if "Restore" in obj.State or not getattr(obj, "ToolMount", None):
+            return
+        if prop == "Configuration":
             try:
                 self.pose(obj)
             except Exception as problem:
                 FreeCAD.Console.PrintError("kin5axcam: the machine cannot be posed: %s\n" % problem)
+        elif prop in ("JointSize", "ShowJoints"):
+            try:
+                self.showJoints(obj, self.chain(obj))
+            except Exception as problem:
+                FreeCAD.Console.PrintError("kin5axcam: the joints cannot be shown: %s\n" % problem)
 
     def execute(self, obj):
         self.pose(obj)

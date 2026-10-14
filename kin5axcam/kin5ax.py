@@ -27,6 +27,13 @@ for in this order: the path in the environment variable ``KIN5AXC_LIBRARY``; the
 for development; and finally wherever the system loader finds a library of that
 name. ``library_candidates()`` lists them and the error of a failed load names
 every one that was tried.
+
+**The version is checked** as the library is loaded: ``REQUIRED_VERSION`` is what
+this binding was written against, and a library that does not match it is refused
+with ``IncompatibleLibrary`` rather than called into, since the two halves ship
+together but can be installed apart. While the major number is 0 the minor has to
+match exactly. ``KIN5AXC_SKIP_VERSION_CHECK`` in the environment passes anything,
+which is for someone building both halves at once.
 """
 
 import ctypes
@@ -36,6 +43,12 @@ import sys
 
 AXES = 5                                #the five joints of a five-axis machine
 NAME_MAX = 64                           #the longest name of a link, terminating zero included
+
+#The version of kin5ax this binding is written against: the K5_VERSION_MAJOR and K5_VERSION_MINOR of
+#the header it mirrors. A loaded library is checked against it, because the two are shipped together
+#but can be installed apart - a user who builds the library by hand, or keeps an older copy in
+#KIN5AXC_LIBRARY, would otherwise meet a structure read at the wrong offsets rather than a message.
+REQUIRED_VERSION = (0, 1)
 
 #k5_status: what a call can answer
 OK = 0
@@ -116,6 +129,20 @@ class LibraryNotFound(Kin5axError):
                    "the file, or put it in the lib folder of the addon." % ", ".join(tried))
         Kin5axError.__init__(self, ERROR_FILE, message)
         self.tried = tried
+
+
+class IncompatibleLibrary(Kin5axError):
+    """The shared library that was found speaks a version this binding was not written against."""
+
+    def __init__(self, found, path):
+        message = ("the kin5axc shared library at %s is version %s, and this addon needs %d.%d. "
+                   "Install the two together, or point KIN5AXC_LIBRARY at a matching build. Set "
+                   "KIN5AXC_SKIP_VERSION_CHECK=1 to load it anyway, at your own risk."
+                   % (path, ".".join(str(n) for n in found), REQUIRED_VERSION[0],
+                      REQUIRED_VERSION[1]))
+        Kin5axError.__init__(self, ERROR_FILE, message)
+        self.found = found
+        self.path = path
 
 
 # ---------------------------------------------------------------- the structures of the header
@@ -313,34 +340,67 @@ def library_candidates():
 
 
 _library = None
+_loaded_from = None
 
 
 def load(path=None):
     """The library, loaded once and kept. path names the file to load instead of searching for it."""
-    global _library
+    global _library, _loaded_from
     if _library is not None and path is None:
         return _library
     tried = []
+    where = None
     if path is not None:
         tried.append(path)
         library = _load_file(path)
+        where = path
     else:
         library = None
         for candidate in library_candidates():
             tried.append(candidate)
             if os.path.isfile(candidate):
                 library = _load_file(candidate)
+                where = candidate
                 break
         if library is None:
             found = ctypes.util.find_library("kin5axc")
             tried.append("the system loader")
             if found:
                 library = _load_file(found)
+                where = found
     if library is None:
         raise LibraryNotFound(tried)
     _declare(library)
+    _check_version(library, where)
     _library = library
+    _loaded_from = where
     return library
+
+
+def _check_version(library, path):
+    """Refuses a library this binding was not written against, before anything calls into it.
+
+    While the major number is 0 the interface may change between minor
+    versions, so the minor has to match exactly; from 1.0 on, the major has to
+    match and the library may be the newer minor. KIN5AXC_SKIP_VERSION_CHECK
+    passes anything, which is for someone building both halves at once.
+    """
+    if os.environ.get("KIN5AXC_SKIP_VERSION_CHECK"):
+        return
+    major, minor, patch = _version_numbers(library)
+    wanted_major, wanted_minor = REQUIRED_VERSION
+    if wanted_major == 0:
+        suits = (major, minor) == (wanted_major, wanted_minor)
+    else:
+        suits = major == wanted_major and minor >= wanted_minor
+    if not suits:
+        raise IncompatibleLibrary((major, minor, patch), path or "the system loader")
+
+
+def _version_numbers(library):
+    major, minor, patch = ctypes.c_int(0), ctypes.c_int(0), ctypes.c_int(0)
+    library.k5_version(ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch))
+    return major.value, minor.value, patch.value
 
 
 def _load_file(path):
@@ -483,7 +543,19 @@ def last_error(library=None):
 
 
 def version(library=None):
+    """The version of the loaded library, as it states it: "0.1.0"."""
     return load(library).k5_version_string().decode("ascii")
+
+
+def version_numbers(library=None):
+    """The same as three integers, which is what a comparison wants."""
+    return _version_numbers(load(library))
+
+
+def loaded_from(library=None):
+    """The file the library was loaded from, for a report or a bug of someone else's making."""
+    load(library)
+    return _loaded_from
 
 
 def _check(lib, status, call):

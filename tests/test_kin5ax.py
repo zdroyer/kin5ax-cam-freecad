@@ -84,7 +84,35 @@ class FindingTheLibrary(unittest.TestCase):
 class TheLibrary(unittest.TestCase):
 
     def test_it_says_which_version_it_is(self):
-        self.assertTrue(kin5ax.version().startswith("1"), kin5ax.version())
+        major, minor, patch = kin5ax.version_numbers()
+        self.assertEqual("%d.%d.%d" % (major, minor, patch), kin5ax.version())
+        self.assertTrue(os.path.isfile(kin5ax.loaded_from()), kin5ax.loaded_from())
+
+    def test_the_library_it_loads_is_the_one_this_binding_was_written_against(self):
+        """The two halves ship together and can be installed apart: an old library found through
+        KIN5AXC_LIBRARY would otherwise be read at the wrong offsets instead of reported."""
+        major, minor, _ = kin5ax.version_numbers()
+        self.assertEqual(kin5ax.REQUIRED_VERSION, (major, minor),
+                         "the library here is %s" % kin5ax.version())
+
+    def test_a_library_of_another_version_is_refused_with_a_message(self):
+        """The check itself, against a library that says it is something else."""
+
+        class Pretender(object):
+            def __init__(self, major, minor, patch):
+                self.numbers = (major, minor, patch)
+
+            def k5_version(self, major, minor, patch):
+                major._obj.value, minor._obj.value, patch._obj.value = self.numbers
+
+        wanted_major, wanted_minor = kin5ax.REQUIRED_VERSION
+        kin5ax._check_version(Pretender(wanted_major, wanted_minor, 99), "here")
+        for other in ((wanted_major + 1, wanted_minor, 0), (wanted_major, wanted_minor + 1, 0)):
+            with self.assertRaises(kin5ax.IncompatibleLibrary) as refused:
+                kin5ax._check_version(Pretender(*other), "nowhere/libkin5axc.so")
+            self.assertIn("nowhere/libkin5axc.so", str(refused.exception))
+            self.assertIn(".".join(str(n) for n in other), str(refused.exception))
+            self.assertEqual(other, refused.exception.found)
 
     def test_the_default_settings_are_the_ones_the_header_promises(self):
         settings = kin5ax.Settings.default()

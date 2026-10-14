@@ -241,6 +241,8 @@ class ObjectSimulation(object):
         machine_object = obj.Machine
         chain = machine_object.Proxy.chain(machine_object) if machine_object is not None else None
         options = self.options(obj)
+        if not self.pictureBelongsToTheMachine(obj):
+            self.clearPicture(obj)
         self.forgetCut()
         joints, solved, statuses, tips, axes, operations_of_steps = [], [], [], [], [], []
         reports = []
@@ -316,6 +318,40 @@ class ObjectSimulation(object):
         finally:
             tool.close()
 
+    OWNED = ("Tool", "Holder", "Unreachable", "Cloud", "GougeMarker", "ToolFrame", "PartFrame")
+
+    def clearPicture(self, obj):
+        """Takes every object this simulation put in the document out again.
+
+        The tool and the holder hang from the machine's mount or from a frame of
+        this object's own, the cloud and the markers sit in the material part or
+        in the part frame: whichever it was, a change of machine makes it the
+        wrong parent, and the next recompute builds them again under the right
+        one. Called when the machine changes and when the simulation is deleted.
+        """
+        document = obj.Document
+        for link in list(obj.Workpiece):
+            if link is not None and link.Document is not None:
+                document.removeObject(link.Name)
+        obj.Workpiece = []
+        for name in self.OWNED:
+            owned = getattr(obj, name, None)
+            if owned is not None:
+                setattr(obj, name, None)
+                if owned.Document is not None:
+                    document.removeObject(owned.Name)
+        self._shown_operation = None
+        self.forgetCut()
+
+    def pictureBelongsToTheMachine(self, obj):
+        """Whether the tool hangs where this simulation's machine - or the lack of one - says it should."""
+        tool = obj.Tool
+        if tool is None:
+            return True
+        if obj.Machine is not None:
+            return tool in obj.Machine.ToolMount.Group
+        return obj.ToolFrame is not None and tool in obj.ToolFrame.Group
+
     def placeWorkpiece(self, obj):
         """Links to the model and the stock of the job, in the part of the material frame.
 
@@ -345,6 +381,9 @@ class ObjectSimulation(object):
                 view = getattr(link, "ViewObject", None)
                 if view is not None and target is getattr(job, "Stock", None):
                     view.Transparency = 70
+            #the placement of the model or the stock is part of where it is: a link leaves it out
+            #unless told to carry it, and then the stock sat at the origin while the cut did not
+            link.LinkTransform = True
             link.Label = "%s on the machine" % target.Label
             links.append(link)
         for stale in existing.values():
@@ -634,14 +673,59 @@ class ObjectSimulation(object):
         self._shown_operation = operation_index
 
     def onChanged(self, obj, prop):
-        if prop == "Step" and "Restore" not in obj.State and getattr(obj, "StepCount", 0):
+        if "Restore" in obj.State:
+            return
+        if prop == "Step" and getattr(obj, "StepCount", 0):
             try:
                 self.pose(obj)
             except Exception as problem:
                 FreeCAD.Console.PrintError("kin5axcam: the simulation cannot be posed: %s\n" % problem)
+        elif prop == "Machine" and hasattr(obj, "Tool") and not self.pictureBelongsToTheMachine(obj):
+            #the old picture hangs from the old machine: down with it, the recompute builds it anew
+            self.clearPicture(obj)
 
     def onDocumentRestored(self, obj):
         self.forget()
+
+
+class ViewProviderSimulation(object):
+    """The tree side of a simulation: its own frames as children, and its picture gone with it."""
+
+    def __init__(self, vobj):
+        vobj.Proxy = self
+
+    def attach(self, vobj):
+        self.Object = vobj.Object
+
+    def claimChildren(self):
+        obj = getattr(self, "Object", None)
+        if obj is None:
+            return []
+        return [o for o in (getattr(obj, "ToolFrame", None), getattr(obj, "PartFrame", None))
+                if o is not None]
+
+    def onDelete(self, vobj, subelements):
+        obj = vobj.Object
+        proxy = getattr(obj, "Proxy", None)
+        if isinstance(proxy, ObjectSimulation):
+            try:
+                proxy.clearPicture(obj)
+            except Exception as problem:
+                FreeCAD.Console.PrintWarning("kin5axcam: the picture of the simulation is left behind: "
+                                             "%s\n" % problem)
+        return True
+
+    def dumps(self):
+        return None
+
+    def loads(self, state):
+        return None
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
 
 
 def Create(name, machine_object, job, document=None):
@@ -650,4 +734,6 @@ def Create(name, machine_object, job, document=None):
         document = FreeCAD.ActiveDocument
     obj = document.addObject("App::FeaturePython", name)
     ObjectSimulation(obj, machine_object, job)
+    if getattr(obj, "ViewObject", None) is not None:
+        ViewProviderSimulation(obj.ViewObject)
     return obj

@@ -90,6 +90,61 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertTrue(any(o.Name in linked for o in self.job.Model.Group), "the model")
         for link in self.simulation.Workpiece:
             self.assertIn(link, self.machine.Material.Group)
+            self.assertTrue(link.LinkTransform, "a link carries the placement of what it links to")
+
+    def test_the_stock_is_where_the_cut_is_even_when_the_part_is_not_at_the_origin(self):
+        """A model placed away from the origin: the stock follows it, and so must the links and the
+        cloud - the linked stock and the surface of the block have to share a bounding box."""
+        self.box.Placement.Base = FreeCAD.Vector(37.0, -12.0, 5.0)
+        self.document.recompute()
+        sim = self.simulation
+        stock = [link for link in sim.Workpiece if link.LinkedObject == self.job.Stock][0]
+        linked = stock.Shape.BoundBox
+        real = self.job.Stock.Shape.BoundBox
+        self.assertAlmostEqual(real.XMin, linked.XMin, delta=1e-6, msg="the link is where the stock is")
+        self.assertAlmostEqual(real.ZMax, linked.ZMax, delta=1e-6)
+        cloud = sim.Cloud.Points.BoundBox
+        voxel = sim.Proxy.voxelSize(sim)
+        self.assertAlmostEqual(real.XMin, cloud.XMin, delta=voxel, msg="and so is the cloud")
+        self.assertAlmostEqual(real.YMax, cloud.YMax, delta=voxel)
+
+    def test_a_change_of_machine_moves_the_whole_picture(self):
+        """Take the machine away and the tool, the cloud and the markers come along, not stay behind."""
+        sim = self.simulation
+        sim.Step = sim.StepCount // 2
+        old_mount = self.machine.ToolMount
+        old_tool = sim.Tool
+        self.assertIn(old_tool, old_mount.Group)
+
+        sim.Machine = None
+        self.document.recompute()
+        self.assertIsNone(sim.Machine)
+        self.assertEqual([], [o for o in old_mount.Group], "nothing of the simulation left at the mount")
+        self.assertEqual([], [o for o in self.machine.Material.Group
+                              if o.Name.startswith(sim.Name)], "nor in the material frame")
+        self.assertIsNotNone(sim.ToolFrame)
+        self.assertIn(sim.Tool, sim.ToolFrame.Group)
+        self.assertIn(sim.Cloud, sim.PartFrame.Group)
+        self.assertEqual([], sim.Workpiece)
+
+        #and back again
+        sim.Machine = self.machine
+        self.document.recompute()
+        self.assertIn(sim.Tool, self.machine.ToolMount.Group)
+        self.assertIsNone(sim.ToolFrame)
+        self.assertIsNone(sim.PartFrame)
+        self.assertGreater(len(sim.Workpiece), 0)
+
+    def test_clearing_the_picture_leaves_nothing_of_the_simulation_in_the_document(self):
+        sim = self.simulation
+        sim.Step = sim.StepCount - 1
+        before = {o.Name for o in self.document.Objects}
+        sim.Proxy.clearPicture(sim)
+        after = {o.Name for o in self.document.Objects}
+        gone = before - after
+        self.assertTrue(all(name.startswith(sim.Name) for name in gone), gone)
+        self.assertFalse(any(name.startswith(sim.Name) and name != sim.Name for name in after),
+                         "nothing of the simulation but the simulation itself")
 
     def test_the_tool_of_the_operation_hangs_from_the_mount(self):
         self.assertIsNotNone(self.simulation.Tool)

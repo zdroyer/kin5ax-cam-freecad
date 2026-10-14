@@ -138,12 +138,16 @@ class CommandSimulate(object):
                 machine_object = the_one(machines, selected, translate("Kin5axMachine", "machine"))
                 if machine_object is None:
                     return
-            reuse = [s for s in simulations_of(document) if s.Job == job and s.Machine == machine_object]
+            #one simulation per job: a machine that came later, or went, is a change of the one
+            #simulation, not a second one with the old picture left in the view
+            reuse = [s for s in simulations_of(document) if s.Job == job]
             sim = reuse[0] if reuse else None
             if sim is None:
                 document.openTransaction("Simulation on the machine")
                 sim = simulation.Create("Simulation", machine_object, job, document)
                 document.commitTransaction()
+            elif sim.Machine != machine_object:
+                sim.Machine = machine_object
         try:
             document.recompute()
         except Exception as problem:

@@ -41,6 +41,11 @@ QT_TRANSLATE_NOOP = QtCore.QT_TRANSLATE_NOOP
 
 ICONS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Resources", "icons")
 
+#where the file dialog of the machine command opens; the logic is in machine.py, which a headless
+#test can import, since this module registers commands as it is read and so needs a GUI
+machine_folder = machine.machine_folder
+remember_machine_folder = machine.remember_machine_folder
+
 
 def icon(name):
     """The icon registered under that name, or the file itself, or nothing when there is no file."""
@@ -93,7 +98,8 @@ class CommandMachine(object):
             "MenuText": QT_TRANSLATE_NOOP("CAM_Kin5axMachine", "Machine from kin5ax"),
             "ToolTip": QT_TRANSLATE_NOOP("CAM_Kin5axMachine",
                                          "Put a five-axis machine of kin5ax in the document, from its "
-                                         "kinematic chain file (.kc or .kc.json)"),
+                                         "kinematic chain file (.kc or .kc.json). Fourteen machines "
+                                         "come with the addon, and the dialog opens on them"),
         }
 
     def IsActive(self):
@@ -102,9 +108,10 @@ class CommandMachine(object):
     def Activated(self):
         path, _ = QtGui.QFileDialog.getOpenFileName(
             FreeCADGui.getMainWindow(), translate("Kin5axMachine", "The kinematic chain of the machine"),
-            "", "kin5ax chain files (*.kc.json *.kc);;All files (*)")
+            machine_folder(), "kin5ax chain files (*.kc.json *.kc);;All files (*)")
         if not path:
             return
+        remember_machine_folder(path)
         document = FreeCAD.ActiveDocument
         document.openTransaction("Machine from kin5ax")
         try:

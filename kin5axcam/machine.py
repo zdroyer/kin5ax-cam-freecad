@@ -488,6 +488,38 @@ def globalise(obj, wanted):
         setattr(obj, name, value)
 
 
+#where the addon remembers the folder a machine was last taken from
+PARAMETERS = "User parameter:BaseApp/Preferences/Mod/kin5axcam"
+
+
+def shipped_machines():
+    """The folder of chain files that comes with the addon, or "" when it is not there."""
+    folder = os.path.join(kin5ax.addon_directory(), "Resources", "machines")
+    return folder if os.path.isdir(folder) else ""
+
+
+def machine_folder():
+    """Where the file dialog opens: where a machine was taken from last, else the shipped ones.
+
+    Fourteen machines come with the addon, and a dialog that opens on whatever
+    folder FreeCAD happened to use last leaves somebody who has just installed
+    it with no way of knowing that. So it opens on them until a machine is
+    taken from somewhere else, and on that somewhere else afterwards, which is
+    where a user who has their own machine files keeps them.
+    """
+    remembered = FreeCAD.ParamGet(PARAMETERS).GetString("LastMachineFolder", "")
+    if remembered and os.path.isdir(remembered):
+        return remembered
+    return shipped_machines()
+
+
+def remember_machine_folder(path):
+    """The folder a machine was taken from, so that the next dialog opens there."""
+    folder = os.path.dirname(os.path.abspath(path))
+    if os.path.isdir(folder):
+        FreeCAD.ParamGet(PARAMETERS).SetString("LastMachineFolder", folder)
+
+
 def Create(name, chain_file, unit_in_mm=1000.0, document=None):
     """A machine group in the document, built from the chain file, standing at zero."""
     if document is None:

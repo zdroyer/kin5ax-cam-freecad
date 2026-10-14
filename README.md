@@ -243,6 +243,33 @@ FreeCADGui.runCommand("CAM_Kin5axMachine")      # asks for a .kc.json, puts the 
 FreeCADGui.runCommand("CAM_Kin5axSimulate")     # the job on the machine, solved, and the player
 ```
 
+**Fourteen machines come with the addon**, in [`Resources/machines/`](Resources/machines/), and the
+file dialog opens on them, so there is something to put in the document on the day it is installed.
+Three are real machines from their catalogues, with the travels and the swivel ranges of the
+catalogue and the head and pivot offsets estimated and marked as such in the file; the rest are the
+shapes of chain the solver is built for, which is what to reach for when the question is whether a
+path can be cut on a trunnion table rather than on a fork head.
+
+| file | machine |
+|---|---|
+| `SHW_UniForce7000_AC_ForkHead` | travelling column, continuous fork head, no table axis |
+| `Reiden_RX10_A_SwivelHead_C_RotaryTable` | A swivel head over an X/Y cross table with a C rotary table |
+| `Mazak_VTC800-30SR_B_SwivelHead_C_RotaryTable` | travelling column, B swivel head, C rotary table |
+| `AC_TiltRotaryTable` | trunnion table: A tilts, C turns the workpiece |
+| `AC45_NutatingTable` | nutating table, the A axis at 45° |
+| `BC_TiltRotaryTable`, `..._XYonTable` | B/C table, the second with X and Y under the table |
+| `WM308S2_BC_SwivelHead_RotaryTable` | swivel head B with a rotary table C |
+| `WM508MT2_AB_MillTurn` | mill-turn: A and B in the head, the workpiece on the linear axes |
+| `3CWithSphericalWrist_*` | three linear axes and a spherical wrist, which meets itself when it leans far |
+
+Those three catalogue machines come as `.kc.json` as well as `.kc`; both forms are the same machine
+and either opens. **The lengths in all of them are metres**, which is what the machine's
+`UnitInMillimetres` of 1000 says; a file of your own in millimetres needs that set to 1 after it is
+opened, because nothing in a chain file states its unit.
+
+After you take a machine from somewhere else, the dialog opens there instead, which is where your
+own machines are once you have any.
+
 **The machine** is a group with an `App::Part` per segment of each branch of the chain. Each holds
 the collision boxes of that segment exactly as the file gives them and the solver checks them — what
 is seen is what collides — and a thin arm to the next segment, so a file that carries boxes on its

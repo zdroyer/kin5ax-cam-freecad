@@ -249,5 +249,62 @@ class AMachineInADocument(unittest.TestCase):
         os.remove(path)
 
 
+class TheMachinesThatShipWithTheAddon(unittest.TestCase):
+    """Fourteen chain files come with the addon, and a user has to be able to find them.
+
+    They are the only thing that makes the machine command usable on the day it
+    is installed: without one there is nothing to open, and a file dialog that
+    starts on whatever folder FreeCAD used last says nothing about their
+    existing at all.
+    """
+
+    def test_they_are_there_and_the_real_machines_among_them(self):
+        self.assertTrue(os.path.isdir(CHAINS), CHAINS)
+        files = sorted(f for f in os.listdir(CHAINS) if f.endswith((".kc", ".kc.json")))
+        self.assertGreaterEqual(len(files), 14, files)
+        for catalogue in ("SHW_UniForce7000_AC_ForkHead",
+                          "Reiden_RX10_A_SwivelHead_C_RotaryTable",
+                          "Mazak_VTC800-30SR_B_SwivelHead_C_RotaryTable"):
+            self.assertIn(catalogue + ".kc", files)
+            self.assertIn(catalogue + ".kc.json", files, "the JSON form as well")
+
+    @unittest.skipUnless(library_is_there(), "needs the kin5axc library")
+    def test_every_one_of_them_opens_as_a_chain(self):
+        """A model that ships and does not load is worse than one that is missing."""
+        for name in sorted(os.listdir(CHAINS)):
+            if not name.endswith((".kc", ".kc.json")):
+                continue
+            with kin5ax.Chain(os.path.join(CHAINS, name)) as chain:
+                links = chain.links()
+                self.assertEqual(kin5ax.AXES, len(links), name)
+                turning = [l for l in links if l.is_revolute]
+                self.assertEqual(2, len(turning), "%s: a five-axis machine has two rotary joints" % name)
+
+    @unittest.skipUnless(FreeCAD is not None, "needs FreeCAD for the parameter store")
+    def test_the_dialog_opens_on_them_until_a_machine_is_taken_from_somewhere_else(self):
+        from kin5axcam import machine as machine_module
+
+        parameters = FreeCAD.ParamGet(machine_module.PARAMETERS)
+        before = parameters.GetString("LastMachineFolder", "")
+        try:
+            parameters.SetString("LastMachineFolder", "")
+            self.assertEqual(os.path.realpath(CHAINS),
+                             os.path.realpath(machine_module.machine_folder()),
+                             "a fresh install opens on the machines it ships")
+
+            elsewhere = tempfile.mkdtemp(prefix="kin5axcam_machines_")
+            machine_module.remember_machine_folder(os.path.join(elsewhere, "mine.kc"))
+            self.assertEqual(os.path.realpath(elsewhere),
+                             os.path.realpath(machine_module.machine_folder()),
+                             "and afterwards on wherever the last one came from")
+
+            #a folder that has gone away falls back rather than opening nowhere
+            os.rmdir(elsewhere)
+            self.assertEqual(os.path.realpath(CHAINS),
+                             os.path.realpath(machine_module.machine_folder()))
+        finally:
+            parameters.SetString("LastMachineFolder", before)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -98,8 +98,8 @@ With --machine <chain file> every move is solved by kin5ax instead and written
 as the machine axes X Y Z A C - direct axes, no TCP, the tool length in the
 model. --machine-unit says the unit of the chain file (m for the machines that
 ship with kin5ax), --rotary-letters what the control calls the two rotary
-axes, --holder-length and --holder-radius the holder FreeCAD's tool bits do
-not describe.
+axes, --holder-model, --holder-length and --holder-radius the holder FreeCAD's
+tool bits do not describe.
 
 It can be used from inside FreeCAD once it is in the macro folder, or from a
 script with:
@@ -203,6 +203,13 @@ parser.add_argument(
     "is the names of the links when they are letters, else the guess of kin5ax",
 )
 parser.add_argument(
+    "--holder-model",
+    help="the designation on the tool holder, e.g. \"BT40 ER32\": one kin5ax has the sizes of, and "
+    "then those sizes are used instead of --holder-length and --holder-radius. Any other name is "
+    "carried but not understood, and the two below describe the holder. The default takes the holder "
+    "the machine file says its machine carries",
+)
+parser.add_argument(
     "--holder-length",
     help="the holder between the tool and the spindle, in mm, which a tool bit does not say; default=50",
 )
@@ -271,6 +278,7 @@ ARC_COMMANDS = ("G2", "G02", "G3", "G03")
 MACHINE = None
 MACHINE_UNIT_IN_MM = None                 # None: what the chain file says; a number overrides it
 ROTARY_LETTERS = None                     # None: the names of the links, or the guess of kin5ax
+HOLDER_MODEL = ""                          # "": the holder the machine file names, else one cylinder
 HOLDER_LENGTH_MM = 50.0
 GAUGE_LENGTH_MM = 0.0                     # 0: the tool standing right up against its holder
 HOLDER_RADIUS_MM = 30.0
@@ -351,6 +359,7 @@ def processArguments(argstring):
     global MACHINE
     global MACHINE_UNIT_IN_MM, GAUGE_LENGTH_MM
     global ROTARY_LETTERS
+    global HOLDER_MODEL
     global HOLDER_LENGTH_MM
     global HOLDER_RADIUS_MM
     global CHECK_LIMITS
@@ -378,6 +387,8 @@ def processArguments(argstring):
         if ROTARY_LETTERS is not None and (len(ROTARY_LETTERS) != 2
                                            or any(c not in "ABC" for c in ROTARY_LETTERS)):
             raise ValueError("--rotary-letters takes two of A, B and C, such as AC")
+        if args.holder_model is not None:
+            HOLDER_MODEL = str(args.holder_model)
         if args.holder_length is not None:
             HOLDER_LENGTH_MM = float(args.holder_length)
         if args.holder_radius is not None:
@@ -734,9 +745,11 @@ class Machine(object):
                              % chain_file)
         #every chain file says what its lengths are in; --machine-unit overrides it
         unit_in_mm = MACHINE_UNIT_IN_MM if MACHINE_UNIT_IN_MM is not None else self.chain.unit_in_mm()
+        #the holder named on the command line, else the one the machine file says it carries
+        holder_model = HOLDER_MODEL or self.chain.default_holder_model()
         self.options = solve.Options(
             unit_in_mm=unit_in_mm, holder_length_mm=HOLDER_LENGTH_MM,
-            gauge_length_mm=GAUGE_LENGTH_MM,
+            gauge_length_mm=GAUGE_LENGTH_MM, holder_model=holder_model,
             holder_radius_mm=HOLDER_RADIUS_MM, check_limits=CHECK_LIMITS,
             check_collisions=CHECK_COLLISIONS, interpolate=INTERPOLATE, max_step_mm=MAX_STEP_MM,
             max_turn_degrees=MAX_TURN_DEGREES, start=START_CRITERION, rotary_letters=ROTARY_LETTERS)

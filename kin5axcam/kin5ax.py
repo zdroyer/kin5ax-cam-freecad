@@ -49,6 +49,7 @@ import sys
 
 AXES = 5                                #the five joints of a five-axis machine
 NAME_MAX = 64                           #the longest name of a link, terminating zero included
+HOLDER_SECTIONS = 3                     #the most cylinders a tool holder is made of
 
 #The version of kin5ax this binding is written against: the K5_VERSION_MAJOR and K5_VERSION_MINOR of
 #the header it mirrors. A loaded library is checked against it, because the two are shipped together
@@ -545,6 +546,18 @@ def _declare(lib):
     lib.k5_tool_mount_to_point_distance.argtypes = [_tool_t, _double_p]
     lib.k5_tool_gauge_length.restype = ctypes.c_int
     lib.k5_tool_gauge_length.argtypes = [_tool_t, _double_p]
+    lib.k5_tool_set_holder.restype = ctypes.c_int
+    lib.k5_tool_set_holder.argtypes = [_tool_t, _double_p, ctypes.c_size_t]
+    lib.k5_chain_default_holder_model.restype = ctypes.c_int
+    lib.k5_chain_default_holder_model.argtypes = [_chain_t, ctypes.c_char_p, ctypes.c_size_t]
+    lib.k5_chain_default_holder.restype = ctypes.c_int
+    lib.k5_chain_default_holder.argtypes = [_chain_t, _double_p, ctypes.c_size_t, _size_p]
+    lib.k5_tool_holder_catalogue_size.restype = ctypes.c_int
+    lib.k5_tool_holder_catalogue_size.argtypes = [_size_p]
+    lib.k5_tool_holder_catalogue_model.restype = ctypes.c_int
+    lib.k5_tool_holder_catalogue_model.argtypes = [ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+    lib.k5_tool_holder_catalogue.restype = ctypes.c_int
+    lib.k5_tool_holder_catalogue.argtypes = [ctypes.c_size_t, _double_p, ctypes.c_size_t, _size_p]
 
     lib.k5_solve_location.restype = ctypes.c_int
     lib.k5_solve_location.argtypes = [_chain_t, _tool_t, ctypes.POINTER(Settings), _double_p,
@@ -633,6 +646,46 @@ def version_numbers(library_path=None):
     return _version_numbers(load(library_path))
 
 
+def holder_catalogue(library_path=None):
+    """The holders a five-axis machine usually carries: (model, cylinders) for each.
+
+    cylinders is a list of (length, radius) from the mount downwards. The sizes
+    are the usual ones for each taper, near enough for a collision check and no
+    substitute for measuring the holder on the machine. They are in METRES,
+    whatever unit the chain is in, so a caller working in millimetres scales
+    them by 1000.
+    """
+    lib = load(library_path)
+    count = ctypes.c_size_t()
+    _check(lib, lib.k5_tool_holder_catalogue_size(ctypes.byref(count)),
+           "k5_tool_holder_catalogue_size")
+    holders = []
+    for index in range(count.value):
+        name = ctypes.create_string_buffer(NAME_MAX)
+        _check(lib, lib.k5_tool_holder_catalogue_model(index, name, NAME_MAX),
+               "k5_tool_holder_catalogue_model")
+        sections = ctypes.c_size_t()
+        out = (ctypes.c_double * (2 * HOLDER_SECTIONS))()
+        _check(lib, lib.k5_tool_holder_catalogue(index, out, 2 * HOLDER_SECTIONS,
+                                                 ctypes.byref(sections)),
+               "k5_tool_holder_catalogue")
+        holders.append((name.value.decode("utf-8", "replace"),
+                        [(out[2 * i], out[2 * i + 1]) for i in range(sections.value)]))
+    return holders
+
+
+def holder_by_model(model, library_path=None):
+    """The cylinders of the catalogue holder of that designation, or None for one it has not.
+
+    The match is exact, as the library makes it: guessing at a spelling would
+    put a holder of the wrong length on the machine.
+    """
+    for name, sections in holder_catalogue(library_path):
+        if name == model:
+            return sections
+    return None
+
+
 def loaded_from(library_path=None):
     """The file the library was loaded from, for a report or a bug of someone else's making."""
     load(library_path)
@@ -704,6 +757,23 @@ class Tool(object):
         _check(self._lib, self._lib.k5_tool_gauge_length(self._handle, ctypes.byref(out)),
                "k5_tool_gauge_length")
         return out.value
+
+    def set_holder(self, sections):
+        """Gives the tool a holder of up to HOLDER_SECTIONS cylinders, from the mount downwards.
+
+        sections is a sequence of (length, radius) pairs in the unit the tool was
+        made in, and replaces the single cylinder the tool was created with. A
+        tool created with a gauge length does not move: that is what measuring
+        one is for. A tool created with 0 stands against its holder, so the tip
+        follows the holder it is given.
+        """
+        pairs = [(float(length), float(radius)) for length, radius in sections]
+        if len(pairs) > HOLDER_SECTIONS:
+            raise ValueError("a tool holder is made of at most %d cylinders" % HOLDER_SECTIONS)
+        flat = [value for pair in pairs for value in pair]
+        out = (ctypes.c_double * max(len(flat), 1))(*flat) if flat else None
+        _check(self._lib, self._lib.k5_tool_set_holder(self._handle, out, len(pairs)),
+               "k5_tool_set_holder")
 
     def mount_to_point_distance(self):
         """How far below the tool mount the programmed point hangs."""
@@ -921,6 +991,36 @@ class Chain(object):
                    "k5_fcm_remark")
             remarks.append(out.value.decode("utf-8", "replace"))
         return remarks
+
+    def default_holder_model(self):
+        """The designation of the holder this machine usually carries, or "" when it names none.
+
+        Free text, the designation on the holder itself: "BT40 ER32", "HSK63A
+        SF12". The library never reads it; it is here so that a host can match
+        it against the holders it has of its own. It is a default to offer,
+        nothing the kinematics depend on.
+        """
+        out = ctypes.create_string_buffer(NAME_MAX)
+        _check(self._lib, self._lib.k5_chain_default_holder_model(self._handle, out, NAME_MAX),
+               "k5_chain_default_holder_model")
+        return out.value.decode("utf-8", "replace")
+
+    def default_holder(self):
+        """The shape of that holder: (length, radius) per cylinder, from the mount downwards.
+
+        In the unit of the chain file. Empty for a chain that names no holder,
+        and empty for one that names a model without giving its shape, which is
+        a name for the host to resolve.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_chain_default_holder(self._handle, None, 0, ctypes.byref(count)),
+               "k5_chain_default_holder")
+        doubles = 2 * count.value
+        out = (ctypes.c_double * max(doubles, 1))()
+        _check(self._lib, self._lib.k5_chain_default_holder(self._handle, out, doubles,
+                                                            ctypes.byref(count)),
+               "k5_chain_default_holder")
+        return [(out[2 * i], out[2 * i + 1]) for i in range(count.value)]
 
     def link_count(self):
         out = ctypes.c_size_t()

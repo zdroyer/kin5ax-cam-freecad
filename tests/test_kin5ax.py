@@ -620,6 +620,142 @@ class TheFreeCadMachineFileBridge(unittest.TestCase):
 
 
 @needs_library
+class TheHolderOfAToolModel(unittest.TestCase):
+    """What the addon builds a tool out of: the bit's dimensions and the holder nobody measured.
+
+    A designation the catalogue knows brings three cylinders with it, and then
+    the holder length of the model is what they add up to rather than whatever a
+    property was left at. Everything here is in millimetres, and the catalogue
+    is in metres.
+    """
+
+    def test_a_named_holder_brings_its_cylinders_in_millimetres(self):
+        from kin5axcam import solve
+
+        model, metres = kin5ax.holder_catalogue()[0]
+        millimetres = solve.catalogue_holder_mm(model)
+        self.assertEqual([(1000.0 * length, 1000.0 * radius) for length, radius in metres],
+                         millimetres)
+        self.assertIsNone(solve.catalogue_holder_mm("no such holder"))
+        self.assertIsNone(solve.catalogue_holder_mm(""))
+
+    def test_a_named_holder_decides_the_length_of_the_assembly(self):
+        from kin5axcam import solve
+
+        model_name, sections = kin5ax.holder_catalogue()[0]
+        holder_mm = 1000.0 * sum(length for length, _ in sections)
+        tool = solve.ToolModel(kin5ax.TOOL_FLAT_END, 6.0, 30.0, 20.0, 50.0, 30.0,
+                               holder_model=model_name)
+        self.assertAlmostEqual(holder_mm, tool.holder_length_mm, delta=1e-9,
+                               msg="the holder that was named, not the property it replaces")
+        self.assertEqual(len(sections), len(tool.holder_sections_mm))
+        self.assertAlmostEqual(30.0 + 20.0 + holder_mm, tool.assembly_length_mm, delta=1e-9)
+
+    def test_a_name_the_catalogue_has_not_leaves_the_single_cylinder(self):
+        from kin5axcam import solve
+
+        tool = solve.ToolModel(kin5ax.TOOL_FLAT_END, 6.0, 30.0, 20.0, 50.0, 30.0,
+                               holder_model="the one in the second drawer")
+        self.assertEqual([(50.0, 30.0)], tool.holder_sections_mm)
+        self.assertAlmostEqual(30.0 + 20.0 + 50.0, tool.assembly_length_mm, delta=1e-9)
+
+    def test_the_cylinders_reach_the_library(self):
+        """The whole point of naming one: a collision check on the shape of that holder."""
+        from kin5axcam import solve
+
+        model_name, sections = kin5ax.holder_catalogue()[0]
+        model = solve.ToolModel(kin5ax.TOOL_FLAT_END, 6.0, 30.0, 20.0, 0.0, 0.0,
+                                holder_model=model_name)
+        tool = model.to_kin5ax(1000.0)
+        try:
+            self.assertAlmostEqual((30.0 + 20.0 + model.holder_length_mm) / 1000.0,
+                                   tool.gauge_length(), delta=1e-12)
+        finally:
+            tool.close()
+
+
+@needs_library
+class TheCatalogueOfToolHolders(unittest.TestCase):
+    """The holders a five-axis machine usually carries, so that one can be picked from a list.
+
+    A host matches what a machine file names against the holders it has of its
+    own; this list is what it offers when it has none. The sizes are in metres,
+    whatever unit the chain is in.
+    """
+
+    def test_it_holds_named_holders_of_plausible_size(self):
+        holders = kin5ax.holder_catalogue()
+        self.assertGreaterEqual(len(holders), 5)
+        for model, sections in holders:
+            self.assertNotEqual("", model)
+            self.assertGreaterEqual(len(sections), 1)
+            self.assertLessEqual(len(sections), kin5ax.HOLDER_SECTIONS)
+            length = sum(section[0] for section in sections)
+            self.assertGreater(length, 0.02, "%s is shorter than any holder" % model)
+            self.assertLess(length, 0.30, "%s is longer than any holder" % model)
+            for one_length, radius in sections:
+                self.assertGreater(one_length, 0.0)
+                self.assertGreater(radius, 0.0)
+
+    def test_a_holder_is_found_by_its_designation_exactly(self):
+        model, sections = kin5ax.holder_catalogue()[0]
+        self.assertEqual(sections, kin5ax.holder_by_model(model))
+        self.assertIsNone(kin5ax.holder_by_model(model.lower()),
+                          "guessing at a spelling would put the wrong holder on the machine")
+        self.assertIsNone(kin5ax.holder_by_model("no such holder"))
+
+
+@needs_library
+@needs_chain
+class TheHolderAMachineFileNames(unittest.TestCase):
+    """What the chain says its machine usually carries: a default to offer, and nothing more.
+
+    The end of the tool branch is the tool mount whether a holder is named or
+    not, and the tip of the tool reaches the gauge length below it either way.
+    """
+
+    def test_a_machine_of_the_catalogue_names_its_holder_and_its_cylinders(self):
+        chain = kin5ax.Chain(os.path.join(
+            CHAINS, "Mazak_VTC800-30SR_B_SwivelHead_C_RotaryTable.kc"))
+        try:
+            model = chain.default_holder_model()
+            self.assertNotEqual("", model)
+            sections = chain.default_holder()
+            self.assertEqual(sections, kin5ax.holder_by_model(model),
+                             "the file and the catalogue agree on the holder of that name")
+        finally:
+            chain.close()
+
+    def test_a_holder_of_the_catalogue_goes_onto_a_tool(self):
+        """What a host does with the list: the holder it picked becomes the tool's."""
+        sections = kin5ax.holder_by_model(kin5ax.holder_catalogue()[0][0])
+        tool = kin5ax.Tool(kin5ax.TOOL_FLAT_END, 0.006, 0.0, 0.030, 0.020, 0.0, 0.0)
+        try:
+            tool.set_holder(sections)
+            holder = sum(length for length, _ in sections)
+            self.assertAlmostEqual(0.030 + 0.020 + holder, tool.gauge_length(), delta=1e-12)
+        finally:
+            tool.close()
+
+    def test_a_measured_tool_does_not_move_when_its_holder_changes(self):
+        tool = kin5ax.Tool(kin5ax.TOOL_FLAT_END, 0.006, 0.0, 0.030, 0.020, 0.050, 0.030, 0.200)
+        try:
+            tool.set_holder(kin5ax.holder_by_model(kin5ax.holder_catalogue()[0][0]))
+            self.assertAlmostEqual(0.200, tool.gauge_length(), delta=1e-12,
+                                   msg="that is what measuring a tool is for")
+        finally:
+            tool.close()
+
+    def test_more_cylinders_than_a_holder_has_are_refused(self):
+        tool = kin5ax.Tool(kin5ax.TOOL_FLAT_END, 0.006, 0.0, 0.030, 0.020, 0.0, 0.0)
+        try:
+            with self.assertRaises(ValueError):
+                tool.set_holder([(0.01, 0.02)] * (kin5ax.HOLDER_SECTIONS + 1))
+        finally:
+            tool.close()
+
+
+@needs_library
 @needs_chain
 class TheGaugeLengthOfATool(unittest.TestCase):
     """The tool length a control is set with: from the tip to where the holder is clamped.

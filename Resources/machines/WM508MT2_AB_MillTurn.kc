@@ -15,8 +15,14 @@
 	parameter_value_minimum CDATA #IMPLIED
 	parameter_value_maximum CDATA #IMPLIED
 >
-<!ELEMENT tool_holder EMPTY>
+<!ELEMENT tool_holder (section*)>
 <!ATTLIST tool_holder
+	length CDATA #IMPLIED
+	radius CDATA #IMPLIED
+	model CDATA #IMPLIED
+>
+<!ELEMENT section EMPTY>
+<!ATTLIST section
 	length CDATA #REQUIRED
 	radius CDATA #REQUIRED
 >

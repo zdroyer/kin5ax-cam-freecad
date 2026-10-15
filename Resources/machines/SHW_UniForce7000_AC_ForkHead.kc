@@ -18,8 +18,14 @@
 	parameter_value_minimum CDATA #IMPLIED
 	parameter_value_maximum CDATA #IMPLIED
 >
-<!ELEMENT tool_holder EMPTY>
+<!ELEMENT tool_holder (section*)>
 <!ATTLIST tool_holder
+	length CDATA #IMPLIED
+	radius CDATA #IMPLIED
+	model CDATA #IMPLIED
+>
+<!ELEMENT section EMPTY>
+<!ATTLIST section
 	length CDATA #REQUIRED
 	radius CDATA #REQUIRED
 >
@@ -72,7 +78,11 @@
 <initial_translation x="0" y="0.652" z="0"/>
 <initial_rotation x="0.57735026919" y="-0.57735026919" z="0.57735026919" alpha="120"/>
 <box x1="-0.2" x2="0.2" y1="-0.2" y2="0.2" z1="0.08" z2="0.7"  />
-<tool_holder length="0.05" radius="0.03"/>
+<tool_holder model="BT50 ER40">
+<section length="0.08" radius="0.0629"/>
+<section length="0.035" radius="0.036"/>
+<section length="0.04" radius="0.034"/>
+</tool_holder>
 </segment>
 </tool_part>
 <material_holder_part>

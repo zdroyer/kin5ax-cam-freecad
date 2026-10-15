@@ -89,6 +89,9 @@ class ObjectMachine(object):
          False),
         ("App::PropertyFloat", "UnitInMillimetres",
          "How many millimetres one length unit of the chain file is: 1000 for metres", 1000.0),
+        ("App::PropertyString", "HolderModel",
+         "The tool holder this machine usually carries, as its chain file names it: a default for a "
+         "simulation to take, and empty for a file that names none", ""),
         ("App::PropertyFloatList", "Configuration",
          "The five joint values the machine stands at, in the order of the links of the chain, in the "
          "units of its file and in radians", None),
@@ -130,6 +133,10 @@ class ObjectMachine(object):
             with openChain(chain_file, obj) as chain:
                 unit_in_mm = chain.unit_in_mm()
         obj.UnitInMillimetres = float(unit_in_mm)
+        #the holder the file says the machine carries: a default for whoever puts a tool in the
+        #spindle, and nothing the kinematics depend on
+        with openChain(chain_file, obj) as chain:
+            obj.HolderModel = chain.default_holder_model()
         obj.ArmRadius = 0.0
         obj.JointSize = 0.0
         obj.ShowJoints = True

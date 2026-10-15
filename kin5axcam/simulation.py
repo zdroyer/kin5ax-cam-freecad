@@ -70,9 +70,15 @@ class ObjectSimulation(object):
         ("App::PropertyLink", "Job", "The job whose operations are run", None),
         ("App::PropertyLinkList", "Operations",
          "The operations run, in this order; none means every active operation of the job", None),
+        ("App::PropertyString", "HolderModel",
+         "The holder between the tool and the spindle, by the designation on it: one of the holders "
+         "kin5ax has sizes for (BT40 ER32, HSK63A SF12 and the like) and then the two lengths below "
+         "are that holder's; any other name, or none, and the holder is the single cylinder below. "
+         "Empty takes the holder the machine says it carries", ""),
         ("App::PropertyLength", "HolderLength",
-         "The holder between the tool and the spindle, which a tool bit does not describe", 50.0),
-        ("App::PropertyLength", "HolderRadius", "And its radius", 30.0),
+         "The holder between the tool and the spindle, which a tool bit does not describe; what the "
+         "named holder adds up to when one is named", 50.0),
+        ("App::PropertyLength", "HolderRadius", "And its radius, the widest of a named holder", 30.0),
         ("App::PropertyLength", "GaugeLength",
          "The tool length a control is set with: from the tip of the tool to the place the holder "
          "is clamped, which is where the tool branch of the machine ends. 0 stands the tool right "
@@ -225,6 +231,14 @@ class ObjectSimulation(object):
             obj.PartFrame = frame
         return frame
 
+    def holderModel(self, obj):
+        """The designation of the holder: this object's, or the one the machine says it carries."""
+        model = getattr(obj, "HolderModel", "") or ""
+        if model:
+            return model
+        machine_object = obj.Machine
+        return getattr(machine_object, "HolderModel", "") or "" if machine_object is not None else ""
+
     def options(self, obj):
         unit = self.unit(obj)
         max_step = _quantity(obj.MaxStep) or None
@@ -233,6 +247,7 @@ class ObjectSimulation(object):
             max_step = self.voxelSize(obj)
         return solve.Options(
             unit_in_mm=unit,
+            holder_model=self.holderModel(obj),
             holder_length_mm=_quantity(obj.HolderLength),
             holder_radius_mm=_quantity(obj.HolderRadius),
             gauge_length_mm=_quantity(obj.GaugeLength),
@@ -897,9 +912,23 @@ class ObjectSimulation(object):
         #the assembly below the mount, along the -Z of the mount frame
         tool.Placement = FreeCAD.Placement(FreeCAD.Vector(0, 0, -model.assembly_length_mm),
                                            FreeCAD.Rotation())
-        holder.Shape = Part.makeCylinder(model.holder_radius_mm, model.holder_length_mm)
-        holder.Placement = FreeCAD.Placement(FreeCAD.Vector(0, 0, -model.holder_length_mm),
-                                             FreeCAD.Rotation())
+        #the holder hangs from the mount, which is the origin of this frame, and is up to three
+        #cylinders given from the mount downwards: the taper, what it narrows to, then the nose
+        cylinders = []
+        below = 0.0
+        for length, radius in model.holder_sections_mm:
+            if length > 0.0 and radius > 0.0:
+                cylinders.append(Part.makeCylinder(radius, length,
+                                                   FreeCAD.Vector(0, 0, -below - length),
+                                                   FreeCAD.Vector(0, 0, 1)))
+            below += length
+        if not cylinders:
+            cylinders.append(Part.makeCylinder(max(model.holder_radius_mm, 1e-6),
+                                               max(model.holder_length_mm, 1e-6),
+                                               FreeCAD.Vector(0, 0, -max(model.holder_length_mm, 1e-6)),
+                                               FreeCAD.Vector(0, 0, 1)))
+        holder.Shape = cylinders[0] if len(cylinders) == 1 else Part.makeCompound(cylinders)
+        holder.Placement = FreeCAD.Placement()
         tool.purgeTouched()
         holder.purgeTouched()
         self._shown_operation = operation_index

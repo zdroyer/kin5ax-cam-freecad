@@ -52,10 +52,15 @@ class Options(object):
 
     def __init__(self, unit_in_mm=1000.0, holder_length_mm=50.0, holder_radius_mm=30.0,
                  check_limits=True, check_collisions=True, interpolate=True, max_step_mm=None,
-                 max_turn_degrees=None, start=None, rotary_letters=None, gauge_length_mm=0.0):
+                 max_turn_degrees=None, start=None, rotary_letters=None, gauge_length_mm=0.0,
+                 holder_model=""):
         self.unit_in_mm = float(unit_in_mm)
         self.holder_length_mm = float(holder_length_mm)
         self.holder_radius_mm = float(holder_radius_mm)
+        #The designation of the holder: one of kin5ax.holder_catalogue(), and then its three
+        #cylinders are used and the two lengths above are what they add up to; anything else, and
+        #the holder is the single cylinder above under that name.
+        self.holder_model = str(holder_model or "")
         #the tool length a control is set with, tip to the tool mount of the machine. A machine's
         #tool branch ends where a holder is clamped, so this is what decides where the tip is;
         #0 stands the tool right up against its holder, which is a guess and not a measurement.
@@ -156,6 +161,21 @@ def moves_of(pathobj):
     return moves
 
 
+def catalogue_holder_mm(model):
+    """The cylinders of that catalogue holder in millimetres, or None for a name it has not.
+
+    A list of (length, radius) from the mount downwards. The catalogue is in
+    metres, which is the unit of every machine shipped with the library, and
+    everything in this module is in millimetres.
+    """
+    if not model:
+        return None
+    sections = kin5ax.holder_by_model(model)
+    if sections is None:
+        return None
+    return [(1000.0 * length, 1000.0 * radius) for length, radius in sections]
+
+
 class ToolModel(object):
     """A tool as kin5ax sees it, in millimetres: the dimensions a tool bit gives and the holder it does not.
 
@@ -166,13 +186,26 @@ class ToolModel(object):
     """
 
     def __init__(self, shape, diameter_mm, cutting_height_mm, shank_length_mm, holder_length_mm,
-                 holder_radius_mm, gauge_length_mm=0.0):
+                 holder_radius_mm, gauge_length_mm=0.0, holder_model=""):
         self.shape = shape                              #kin5ax.TOOL_BALL_NOSE or TOOL_FLAT_END
         self.diameter_mm = float(diameter_mm)
         self.cutting_height_mm = float(cutting_height_mm)
         self.shank_length_mm = float(shank_length_mm)
         self.holder_length_mm = float(holder_length_mm)
         self.holder_radius_mm = float(holder_radius_mm)
+        self.holder_model = str(holder_model or "")
+        #A holder of the catalogue is three cylinders, and then its own sizes are the ones that
+        #count: the length is what they add up to and the radius the widest of them, so that
+        #whatever reads holder_length_mm still sees the holder that is there.
+        catalogue = catalogue_holder_mm(self.holder_model)
+        if catalogue:
+            self.holder_sections_mm = catalogue
+            self.holder_length_mm = sum(length for length, _ in catalogue)
+            self.holder_radius_mm = max(radius for _, radius in catalogue)
+        elif self.holder_length_mm > 0.0:
+            self.holder_sections_mm = [(self.holder_length_mm, self.holder_radius_mm)]
+        else:
+            self.holder_sections_mm = []
         #the tool length a control is set with, tip to the tool mount of the machine; 0 stands the
         #tool right up against its holder, which is what a tool bit that does not say implies
         self.gauge_length_mm = float(gauge_length_mm)
@@ -213,10 +246,16 @@ class ToolModel(object):
     def to_kin5ax(self, unit_in_mm):
         """The tool of the library, in the unit of the chain file."""
         radius = self.radius_mm / unit_in_mm
-        return kin5ax.Tool(self.shape, radius, radius, self.cutting_height_mm / unit_in_mm,
+        tool = kin5ax.Tool(self.shape, radius, radius, self.cutting_height_mm / unit_in_mm,
                            self.shank_length_mm / unit_in_mm, self.holder_length_mm / unit_in_mm,
                            self.holder_radius_mm / unit_in_mm,
                            self.gauge_length_mm / unit_in_mm)
+        if len(self.holder_sections_mm) > 1:
+            #a holder of several cylinders: the slim nose of a collet chuck clears what its flange
+            #would not, and a collision check on one cylinder would say otherwise
+            tool.set_holder([(length / unit_in_mm, radius_mm / unit_in_mm)
+                             for length, radius_mm in self.holder_sections_mm])
+        return tool
 
 
 def _length(obj, name, default=0.0):
@@ -240,7 +279,7 @@ def tool_model_of(pathobj, options):
     shank = max(_length(tool, "Length") - cutting, 0.0)
     kind = kin5ax.TOOL_BALL_NOSE if shape in BALL_NOSED_SHAPES else kin5ax.TOOL_FLAT_END
     return ToolModel(kind, diameter, cutting, shank, options.holder_length_mm,
-                     options.holder_radius_mm, options.gauge_length_mm)
+                     options.holder_radius_mm, options.gauge_length_mm, options.holder_model)
 
 
 def tool_of(pathobj, options):

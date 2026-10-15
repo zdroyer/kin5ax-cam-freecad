@@ -82,8 +82,12 @@
         "angle_deg": 120.0
       },
       "tool_holder": {
-        "length": 0.05,
-        "radius": 0.03
+        "model": "BT50 ER40",
+        "sections": [
+        { "length": 0.08, "radius": 0.0629 },
+        { "length": 0.035, "radius": 0.036 },
+        { "length": 0.04, "radius": 0.034 }
+        ]
       },
       "boxes": [
         {

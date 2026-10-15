@@ -43,8 +43,12 @@
         "angle_deg": 90.0
       },
       "tool_holder": {
-        "length": 0.05,
-        "radius": 0.03
+        "model": "HSK63A ER32",
+        "sections": [
+        { "length": 0.05, "radius": 0.04 },
+        { "length": 0.025, "radius": 0.027 },
+        { "length": 0.04, "radius": 0.025 }
+        ]
       },
       "boxes": [
         {

@@ -44,17 +44,22 @@ class Options(object):
 
     unit_in_mm is how many millimetres one length unit of the chain file is -
     1000 for the metres the shipped machines are in. The holder is given here
-    because a tool bit of FreeCAD does not describe one. max_step_mm and
+    because a tool bit of FreeCAD does not describe one, and so is the gauge
+    length, the tip-to-mount measurement a control is set with. max_step_mm and
     max_turn_degrees bound the steps the solver invents between two moves and
     default to the settings of kin5ax; None leaves a value to the library.
     """
 
     def __init__(self, unit_in_mm=1000.0, holder_length_mm=50.0, holder_radius_mm=30.0,
                  check_limits=True, check_collisions=True, interpolate=True, max_step_mm=None,
-                 max_turn_degrees=None, start=None, rotary_letters=None):
+                 max_turn_degrees=None, start=None, rotary_letters=None, gauge_length_mm=0.0):
         self.unit_in_mm = float(unit_in_mm)
         self.holder_length_mm = float(holder_length_mm)
         self.holder_radius_mm = float(holder_radius_mm)
+        #the tool length a control is set with, tip to the tool mount of the machine. A machine's
+        #tool branch ends where a holder is clamped, so this is what decides where the tip is;
+        #0 stands the tool right up against its holder, which is a guess and not a measurement.
+        self.gauge_length_mm = float(gauge_length_mm)
         self.check_limits = bool(check_limits)
         self.check_collisions = bool(check_collisions)
         self.interpolate = bool(interpolate)
@@ -161,13 +166,16 @@ class ToolModel(object):
     """
 
     def __init__(self, shape, diameter_mm, cutting_height_mm, shank_length_mm, holder_length_mm,
-                 holder_radius_mm):
+                 holder_radius_mm, gauge_length_mm=0.0):
         self.shape = shape                              #kin5ax.TOOL_BALL_NOSE or TOOL_FLAT_END
         self.diameter_mm = float(diameter_mm)
         self.cutting_height_mm = float(cutting_height_mm)
         self.shank_length_mm = float(shank_length_mm)
         self.holder_length_mm = float(holder_length_mm)
         self.holder_radius_mm = float(holder_radius_mm)
+        #the tool length a control is set with, tip to the tool mount of the machine; 0 stands the
+        #tool right up against its holder, which is what a tool bit that does not say implies
+        self.gauge_length_mm = float(gauge_length_mm)
 
     @property
     def radius_mm(self):
@@ -179,7 +187,15 @@ class ToolModel(object):
 
     @property
     def assembly_length_mm(self):
-        """From the tip of the tool to the tool mount of the machine."""
+        """From the tip of the tool to the tool mount of the machine: the gauge length.
+
+        This is how far below the end of the machine's tool branch the tip hangs,
+        so it places the tool in the picture and it is what the solver works
+        from. The measured length when the tool carries one, else the tool
+        standing right up against its holder.
+        """
+        if self.gauge_length_mm > 0.0:
+            return self.gauge_length_mm
         return self.cutting_height_mm + self.shank_length_mm + self.holder_length_mm
 
     def programmed_point(self, tip, axis):
@@ -199,7 +215,8 @@ class ToolModel(object):
         radius = self.radius_mm / unit_in_mm
         return kin5ax.Tool(self.shape, radius, radius, self.cutting_height_mm / unit_in_mm,
                            self.shank_length_mm / unit_in_mm, self.holder_length_mm / unit_in_mm,
-                           self.holder_radius_mm / unit_in_mm)
+                           self.holder_radius_mm / unit_in_mm,
+                           self.gauge_length_mm / unit_in_mm)
 
 
 def _length(obj, name, default=0.0):
@@ -222,7 +239,8 @@ def tool_model_of(pathobj, options):
         cutting = 2.0 * diameter
     shank = max(_length(tool, "Length") - cutting, 0.0)
     kind = kin5ax.TOOL_BALL_NOSE if shape in BALL_NOSED_SHAPES else kin5ax.TOOL_FLAT_END
-    return ToolModel(kind, diameter, cutting, shank, options.holder_length_mm, options.holder_radius_mm)
+    return ToolModel(kind, diameter, cutting, shank, options.holder_length_mm,
+                     options.holder_radius_mm, options.gauge_length_mm)
 
 
 def tool_of(pathobj, options):

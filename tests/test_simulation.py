@@ -481,6 +481,38 @@ class AJobOnAMachine(unittest.TestCase):
             apart = sum((tips[3 * i + k] - tips[3 * i - 3 + k]) ** 2 for k in range(3)) ** 0.5
             self.assertLessEqual(apart, longest + 1e-6, "location %d" % i)
 
+    def test_the_gauge_length_defaults_to_the_tool_standing_against_its_holder(self):
+        """The end of a machine's tool branch is where a holder is clamped, so what hangs below
+        it is the whole tool assembly. With nothing measured the solids decide, which is a guess
+        and is said to be one."""
+        from kin5axcam import solve
+
+        sim = self.simulation
+        options = sim.Proxy.options(sim)
+        self.assertEqual(0.0, options.gauge_length_mm)
+        model = solve.tool_model_of(self.operation, options)
+        self.assertAlmostEqual(model.cutting_height_mm + model.shank_length_mm
+                               + model.holder_length_mm, model.assembly_length_mm, delta=1e-9)
+
+    def test_a_measured_gauge_length_moves_the_machine(self):
+        """A longer tool reaches further, so the machine has to stand somewhere else to put the
+        tip on the same point of the part. That is the whole reason the length is a measurement
+        and not a sum of the dimensions of the bit."""
+        from kin5axcam import solve
+
+        sim = self.simulation
+        before = list(sim.Joints)
+        self.assertTrue(before)
+        sim.GaugeLength = 250.0
+        self.document.recompute()
+        options = sim.Proxy.options(sim)
+        self.assertEqual(250.0, options.gauge_length_mm)
+        model = solve.tool_model_of(self.operation, options)
+        self.assertAlmostEqual(250.0, model.assembly_length_mm, delta=1e-9,
+                               msg="the measurement wins over the sum of the solids")
+        self.assertNotEqual(before, list(sim.Joints),
+                            "a tool of another length needs the machine somewhere else")
+
     def test_switching_the_cut_off_takes_the_cloud_away(self):
         sim = self.simulation
         sim.Cut = False

@@ -73,6 +73,10 @@ class ObjectSimulation(object):
         ("App::PropertyLength", "HolderLength",
          "The holder between the tool and the spindle, which a tool bit does not describe", 50.0),
         ("App::PropertyLength", "HolderRadius", "And its radius", 30.0),
+        ("App::PropertyLength", "GaugeLength",
+         "The tool length a control is set with: from the tip of the tool to the place the holder "
+         "is clamped, which is where the tool branch of the machine ends. 0 stands the tool right "
+         "up against its holder, which is a guess; a real machine is set from a presetter", 0.0),
         ("App::PropertyBool", "CheckLimits",
          "A configuration outside the joint limits is no solution", True),
         ("App::PropertyBool", "CheckCollisions",
@@ -231,6 +235,7 @@ class ObjectSimulation(object):
             unit_in_mm=unit,
             holder_length_mm=_quantity(obj.HolderLength),
             holder_radius_mm=_quantity(obj.HolderRadius),
+            gauge_length_mm=_quantity(obj.GaugeLength),
             check_limits=obj.CheckLimits,
             check_collisions=obj.CheckCollisions,
             interpolate=obj.Interpolate,

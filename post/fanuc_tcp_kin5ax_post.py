@@ -192,6 +192,12 @@ parser.add_argument(
     'file itself says, which is the right answer unless you are testing',
 )
 parser.add_argument(
+    "--gauge-length",
+    help="the tool length a control is set with, in millimetres: from the tip to the place the tool "
+    "holder is clamped, which is where the tool branch of the machine ends. The default stands the "
+    "tool right up against its holder, which is a guess and not a measurement",
+)
+parser.add_argument(
     "--rotary-letters",
     help="what the control calls the two rotary axes, in the order of the chain, e.g. AC; the default "
     "is the names of the links when they are letters, else the guess of kin5ax",
@@ -266,6 +272,7 @@ MACHINE = None
 MACHINE_UNIT_IN_MM = None                 # None: what the chain file says; a number overrides it
 ROTARY_LETTERS = None                     # None: the names of the links, or the guess of kin5ax
 HOLDER_LENGTH_MM = 50.0
+GAUGE_LENGTH_MM = 0.0                     # 0: the tool standing right up against its holder
 HOLDER_RADIUS_MM = 30.0
 CHECK_LIMITS = True
 CHECK_COLLISIONS = True
@@ -342,7 +349,7 @@ def processArguments(argstring):
     global TCP_CANCEL
     global VECTOR_PRECISION
     global MACHINE
-    global MACHINE_UNIT_IN_MM
+    global MACHINE_UNIT_IN_MM, GAUGE_LENGTH_MM
     global ROTARY_LETTERS
     global HOLDER_LENGTH_MM
     global HOLDER_RADIUS_MM
@@ -365,6 +372,8 @@ def processArguments(argstring):
         MACHINE = args.machine
         if args.machine_unit:
             MACHINE_UNIT_IN_MM = {"m": 1000.0, "mm": 1.0, "in": 25.4}[args.machine_unit.lower()]
+        if args.gauge_length:
+            GAUGE_LENGTH_MM = float(args.gauge_length)
         ROTARY_LETTERS = args.rotary_letters.upper() if args.rotary_letters else None
         if ROTARY_LETTERS is not None and (len(ROTARY_LETTERS) != 2
                                            or any(c not in "ABC" for c in ROTARY_LETTERS)):
@@ -727,6 +736,7 @@ class Machine(object):
         unit_in_mm = MACHINE_UNIT_IN_MM if MACHINE_UNIT_IN_MM is not None else self.chain.unit_in_mm()
         self.options = solve.Options(
             unit_in_mm=unit_in_mm, holder_length_mm=HOLDER_LENGTH_MM,
+            gauge_length_mm=GAUGE_LENGTH_MM,
             holder_radius_mm=HOLDER_RADIUS_MM, check_limits=CHECK_LIMITS,
             check_collisions=CHECK_COLLISIONS, interpolate=INTERPOLATE, max_step_mm=MAX_STEP_MM,
             max_turn_degrees=MAX_TURN_DEGREES, start=START_CRITERION, rotary_letters=ROTARY_LETTERS)

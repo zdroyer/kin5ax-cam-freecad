@@ -617,3 +617,55 @@ class TheFreeCadMachineFileBridge(unittest.TestCase):
         with self.assertRaises(kin5ax.Kin5axError) as caught:
             kin5ax.Chain.from_fcm(os.path.join(self.folder, "there_is_no_such_machine.fcm"))
         self.assertNotEqual("", caught.exception.message)
+
+
+@needs_library
+@needs_chain
+class TheGaugeLengthOfATool(unittest.TestCase):
+    """The tool length a control is set with: from the tip to where the holder is clamped.
+
+    A machine's tool branch ends at the place a holder is clamped, the same place
+    for every tool it ever holds, so how far the tip reaches below it belongs to
+    what is in the spindle and not to the chain. That is the measurement a
+    presetter gives and a control is set with, and it is why the same dimensions
+    can sit at two different heights.
+    """
+
+    def setUp(self):
+        self.chain = kin5ax.Chain(CHAIN)
+
+    def tearDown(self):
+        self.chain.close()
+
+    def test_a_tool_says_the_length_it_was_made_with(self):
+        tool = kin5ax.Tool(kin5ax.TOOL_BALL_NOSE, 0.016, 0.016, 0.064, 0.030, 0.050, 0.030, 0.250)
+        try:
+            self.assertAlmostEqual(0.250, tool.gauge_length(), delta=1e-12)
+            self.assertAlmostEqual(0.250, tool.assembly_length(), delta=1e-12)
+            self.assertAlmostEqual(0.250 - 0.016, tool.mount_to_point_distance(), delta=1e-12,
+                                   msg="the ball centre hangs one radius above the tip")
+        finally:
+            tool.close()
+
+    def test_not_given_is_the_tool_standing_against_its_holder(self):
+        """What every caller meant before the length existed, and what a tool bit that does not
+        carry one implies."""
+        tool = kin5ax.Tool(kin5ax.TOOL_BALL_NOSE, 0.016, 0.016, 0.064, 0.030, 0.050, 0.030)
+        try:
+            self.assertAlmostEqual(0.064 + 0.030 + 0.050, tool.gauge_length(), delta=1e-12)
+        finally:
+            tool.close()
+
+    def test_two_tools_of_the_same_solids_reach_their_difference_apart(self):
+        short = kin5ax.Tool(kin5ax.TOOL_BALL_NOSE, 0.016, 0.016, 0.064, 0.030, 0.050, 0.030, 0.150)
+        long_one = kin5ax.Tool(kin5ax.TOOL_BALL_NOSE, 0.016, 0.016, 0.064, 0.030, 0.050, 0.030, 0.250)
+        try:
+            q = q_inside_limits(self.chain)
+            a, _ = self.chain.tool_point(q, short)
+            b, _ = self.chain.tool_point(q, long_one)
+            apart = sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+            self.assertAlmostEqual(0.100, apart, delta=1e-12,
+                                   msg="the longer tool reaches exactly its extra length further")
+        finally:
+            short.close()
+            long_one.close()

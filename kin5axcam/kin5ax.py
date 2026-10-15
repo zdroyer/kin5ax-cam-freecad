@@ -54,7 +54,7 @@ NAME_MAX = 64                           #the longest name of a link, terminating
 #the header it mirrors. A loaded library is checked against it, because the two are shipped together
 #but can be installed apart - a user who builds the library by hand, or keeps an older copy in
 #KIN5AXC_LIBRARY, would otherwise meet a structure read at the wrong offsets rather than a message.
-REQUIRED_VERSION = (0, 2)
+REQUIRED_VERSION = (0, 3)
 
 #k5_status: what a call can answer
 OK = 0
@@ -536,13 +536,15 @@ def _declare(lib):
     lib.k5_tool_create.restype = ctypes.c_int
     lib.k5_tool_create.argtypes = [ctypes.c_int, ctypes.c_double, ctypes.c_double, ctypes.c_double,
                                    ctypes.c_double, ctypes.c_double, ctypes.c_double,
-                                   ctypes.POINTER(_tool_t)]
+                                   ctypes.c_double, ctypes.POINTER(_tool_t)]
     lib.k5_tool_free.restype = None
     lib.k5_tool_free.argtypes = [_tool_t]
     lib.k5_tool_assembly_length.restype = ctypes.c_int
     lib.k5_tool_assembly_length.argtypes = [_tool_t, _double_p]
     lib.k5_tool_mount_to_point_distance.restype = ctypes.c_int
     lib.k5_tool_mount_to_point_distance.argtypes = [_tool_t, _double_p]
+    lib.k5_tool_gauge_length.restype = ctypes.c_int
+    lib.k5_tool_gauge_length.argtypes = [_tool_t, _double_p]
 
     lib.k5_solve_location.restype = ctypes.c_int
     lib.k5_solve_location.argtypes = [_chain_t, _tool_t, ctypes.POINTER(Settings), _double_p,
@@ -662,18 +664,26 @@ class Tool(object):
     rz is the radius of the shank, and of a flat end mill; r the radius of the
     ball of a ball nose tool; cutting_height how far the cutting part reaches up
     from the tip; shank_length the part above it; holder_length and
-    holder_radius the holder between the tool and the tool mount. The programmed
-    point follows the shape: the centre of the ball of a ball nose tool, the tip
-    of a flat end mill.
+    holder_radius the holder hanging from the tool mount. The programmed point
+    follows the shape: the centre of the ball of a ball nose tool, the tip of a
+    flat end mill.
+
+    gauge_length is the tool length a control is set with, from the tip to the
+    tool mount of the machine. It is what ties a tool to a chain: the end of a
+    tool branch is where a holder is clamped, the same place for every tool, so
+    how far the tip reaches below it belongs to what is in the spindle. 0 means
+    the tool standing right up against its holder, which is a convenience and
+    not a measurement.
     """
 
     def __init__(self, shape, rz, r, cutting_height, shank_length, holder_length, holder_radius,
-                 library_path=None):
+                 gauge_length=0.0, library_path=None):
         self._lib = load(library_path)
         self._handle = _tool_t()
         _check(self._lib, self._lib.k5_tool_create(
             int(shape), float(rz), float(r), float(cutting_height), float(shank_length),
-            float(holder_length), float(holder_radius), ctypes.byref(self._handle)), "k5_tool_create")
+            float(holder_length), float(holder_radius), float(gauge_length),
+            ctypes.byref(self._handle)), "k5_tool_create")
         self.shape = int(shape)
         self.r = float(r)
 
@@ -686,6 +696,13 @@ class Tool(object):
         out = ctypes.c_double()
         _check(self._lib, self._lib.k5_tool_assembly_length(self._handle, ctypes.byref(out)),
                "k5_tool_assembly_length")
+        return out.value
+
+    def gauge_length(self):
+        """From the tip to the tool mount: what it was made with, or the derived length."""
+        out = ctypes.c_double()
+        _check(self._lib, self._lib.k5_tool_gauge_length(self._handle, ctypes.byref(out)),
+               "k5_tool_gauge_length")
         return out.value
 
     def mount_to_point_distance(self):

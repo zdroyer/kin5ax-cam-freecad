@@ -522,6 +522,10 @@ def _declare(lib):
                                            ctypes.c_size_t, _size_p]
     lib.k5_chain_set_configuration.restype = ctypes.c_int
     lib.k5_chain_set_configuration.argtypes = [_chain_t, _double_p]
+    lib.k5_chain_set_workpiece_holder.restype = ctypes.c_int
+    lib.k5_chain_set_workpiece_holder.argtypes = [_chain_t, _double_p]
+    lib.k5_chain_workpiece_holder.restype = ctypes.c_int
+    lib.k5_chain_workpiece_holder.argtypes = [_chain_t, _double_p]
     lib.k5_chain_solid_name.restype = ctypes.c_int
     lib.k5_chain_solid_name.argtypes = [_chain_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_size_t,
                                         ctypes.c_char_p, ctypes.c_size_t]
@@ -1086,6 +1090,32 @@ class Chain(object):
         """Puts the chain into these joint values, limits unchecked; frames() and links() follow."""
         _check(self._lib, self._lib.k5_chain_set_configuration(self._handle, _doubles(q, AXES, "q")),
                "k5_chain_set_configuration")
+
+    def set_workpiece_holder(self, transformation=None):
+        """The vice, the chuck, the plate the part is bolted to: where the part sits on the table.
+
+        16 doubles in the layout of frames(), the transformation from the frame a
+        cutter location is given in - the frame of the part - to the terminal of
+        the workpiece branch, which is where a holder is mounted. Lengths in the
+        unit of the chain file. None is the identity, the part sitting on the
+        table with nothing in between, which is what a chain starts with.
+
+        Everything this binding answers about a location is in the frame of the
+        part afterwards: solving, postprocessing and tool_point. The frames of
+        frames() are the machine's own and carry no holder, so a host that draws
+        the part puts it in the workpiece terminal by this transformation. A
+        frame that is not rigid - one that scales or shears - is refused.
+        """
+        values = None if transformation is None else _doubles(transformation, 16, "a workpiece holder")
+        _check(self._lib, self._lib.k5_chain_set_workpiece_holder(self._handle, values),
+               "k5_chain_set_workpiece_holder")
+
+    def workpiece_holder(self):
+        """The holder that was given, or the identity: 16 doubles in the layout of frames()."""
+        out = (ctypes.c_double * 16)()
+        _check(self._lib, self._lib.k5_chain_workpiece_holder(self._handle, out),
+               "k5_chain_workpiece_holder")
+        return tuple(out)
 
     def solid_name(self, part, segment, box):
         """What a report calls one solid of a segment: the name to match a drawn part against."""

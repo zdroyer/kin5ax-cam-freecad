@@ -203,6 +203,12 @@ parser.add_argument(
     "is the names of the links when they are letters, else the guess of kin5ax",
 )
 parser.add_argument(
+    "--workpiece-holder",
+    help='where the frame the job is programmed in sits on the table of the machine, which is the '
+    'end of its workpiece branch: "x,y,z" in millimetres, or "x,y,z,ax,ay,az,deg" to turn it about '
+    'an axis as well. The default is the origin of the job on the table itself',
+)
+parser.add_argument(
     "--holder-model",
     help="the designation on the tool holder, e.g. \"BT40 ER32\": one kin5ax has the sizes of, and "
     "then those sizes are used instead of --holder-length and --holder-radius. Any other name is "
@@ -278,6 +284,7 @@ ARC_COMMANDS = ("G2", "G02", "G3", "G03")
 MACHINE = None
 MACHINE_UNIT_IN_MM = None                 # None: what the chain file says; a number overrides it
 ROTARY_LETTERS = None                     # None: the names of the links, or the guess of kin5ax
+WORKPIECE_HOLDER_MM = None                 # None: the origin of the job on the table itself
 HOLDER_MODEL = ""                          # "": the holder the machine file names, else one cylinder
 HOLDER_LENGTH_MM = 50.0
 GAUGE_LENGTH_MM = 0.0                     # 0: the tool standing right up against its holder
@@ -329,6 +336,29 @@ PREAMBLE = None
 POSTAMBLE = None
 
 
+def _workpiece_holder(text):
+    """The frame of the workpiece holder from "x,y,z" or "x,y,z,ax,ay,az,deg", in millimetres.
+
+    16 doubles in the layout kin5ax uses for a frame: where the frame the job is
+    programmed in sits on the table of the machine.
+    """
+    from kin5axcam import machine
+
+    values = [float(v) for v in str(text).replace(";", ",").split(",") if v.strip()]
+    if len(values) == 3:
+        placement = FreeCAD.Placement(FreeCAD.Vector(*values), FreeCAD.Rotation())
+    elif len(values) == 7:
+        axis = FreeCAD.Vector(*values[3:6])
+        if axis.Length < 1e-12:
+            raise ValueError("--workpiece-holder was given a turn about no axis: %r" % text)
+        placement = FreeCAD.Placement(FreeCAD.Vector(*values[:3]),
+                                      FreeCAD.Rotation(axis, values[6]))
+    else:
+        raise ValueError('--workpiece-holder takes "x,y,z" or "x,y,z,ax,ay,az,deg", not %r' % text)
+    #the millimetres of this file; solve.Options scales them into the unit of the chain
+    return machine.frame_of(placement, 1.0)
+
+
 def processArguments(argstring):
     """
     Apply default values and command line arguments before
@@ -359,6 +389,7 @@ def processArguments(argstring):
     global MACHINE
     global MACHINE_UNIT_IN_MM, GAUGE_LENGTH_MM
     global ROTARY_LETTERS
+    global WORKPIECE_HOLDER_MM
     global HOLDER_MODEL
     global HOLDER_LENGTH_MM
     global HOLDER_RADIUS_MM
@@ -387,6 +418,8 @@ def processArguments(argstring):
         if ROTARY_LETTERS is not None and (len(ROTARY_LETTERS) != 2
                                            or any(c not in "ABC" for c in ROTARY_LETTERS)):
             raise ValueError("--rotary-letters takes two of A, B and C, such as AC")
+        if args.workpiece_holder:
+            WORKPIECE_HOLDER_MM = _workpiece_holder(args.workpiece_holder)
         if args.holder_model is not None:
             HOLDER_MODEL = str(args.holder_model)
         if args.holder_length is not None:
@@ -750,6 +783,7 @@ class Machine(object):
         self.options = solve.Options(
             unit_in_mm=unit_in_mm, holder_length_mm=HOLDER_LENGTH_MM,
             gauge_length_mm=GAUGE_LENGTH_MM, holder_model=holder_model,
+            workpiece_holder_mm=WORKPIECE_HOLDER_MM,
             holder_radius_mm=HOLDER_RADIUS_MM, check_limits=CHECK_LIMITS,
             check_collisions=CHECK_COLLISIONS, interpolate=INTERPOLATE, max_step_mm=MAX_STEP_MM,
             max_turn_degrees=MAX_TURN_DEGREES, start=START_CRITERION, rotary_letters=ROTARY_LETTERS)

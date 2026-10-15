@@ -380,6 +380,18 @@ class ThePostWithAMachine(ALeaningPathToPost):
         self.assertNotEqual(self.machined(), self.machined("--machine-unit in"),
                             "taking the same numbers for inches moves every solved axis")
 
+    def test_the_part_can_be_held_somewhere_else_than_on_the_table(self):
+        """The vice: where the frame the job is programmed in sits on the table. The moves do not
+        change - they are the part's - so every solved axis does."""
+        self.lean()
+        on_the_table = self.machined()
+        self.assertNotEqual(on_the_table, self.machined('--workpiece-holder "0,0,20"'),
+                            "a part held 20 mm up needs the machine 20 mm elsewhere")
+        self.assertNotEqual(on_the_table, self.machined('--workpiece-holder "0,0,0,0,0,1,90"'),
+                            "and a part turned a quarter turn needs it turned back")
+        self.assertEqual(on_the_table, self.machined('--workpiece-holder "0,0,0"'),
+                         "the origin on the table is what it does without one")
+
     def test_the_rotary_letters_can_be_said(self):
         self.lean()
         gcode = self.machined("--rotary-letters BC")

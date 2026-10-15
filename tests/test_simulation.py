@@ -205,6 +205,56 @@ class AJobOnAMachine(unittest.TestCase):
         for i in range(3):
             self.assertAlmostEqual(last.axis[i], axis[i], delta=1e-6)
 
+    def test_the_part_in_a_vice_is_still_cut_where_the_moves_say(self):
+        """The vice is where the frame the job is programmed in sits on the table of the machine.
+
+        Lift the part and turn it, and the machine has to stand somewhere else to
+        touch the same point of it. The moves never change: they are the part's.
+        """
+        from kin5axcam import solve
+
+        sim = self.simulation
+        before = list(sim.Joints)
+        self.assertTrue(before)
+        sim.WorkpieceHolder = FreeCAD.Placement(FreeCAD.Vector(0, 0, 20),
+                                                FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), 90))
+        self.document.recompute()
+        self.assertNotEqual(before, list(sim.Joints),
+                            "a part held somewhere else needs the machine somewhere else")
+
+        #the drawn workpiece hangs in the holder, and the holder on the table
+        frame = sim.WorkpieceFrame
+        self.assertIsNotNone(frame)
+        self.assertIn(frame, self.machine.Material.Group)
+        for i in range(3):
+            self.assertAlmostEqual(sim.WorkpieceHolder.Base[i], frame.Placement.Base[i], delta=1e-9)
+        self.assertIn(sim.Workpiece[0], frame.Group, "the part is drawn in its holder")
+
+        #and the oracle: the ball centre of the last step, read in the frame of the part, is the
+        #point the last move asked for
+        sim.Step = sim.StepCount - 1
+        self.assertTrue(sim.Solved[sim.Step], "the last location is still reachable")
+        last = solve.moves_of(self.operation)[-1]
+        options = sim.Proxy.options(sim)
+        model = solve.tool_model_of(self.operation, options)
+        centre = model.programmed_point(last.point, last.axis)
+        hang = model.to_kin5ax(options.unit_in_mm).mount_to_point_distance() * options.unit_in_mm
+        in_machine = self.machine.ToolMount.Placement.multVec(FreeCAD.Vector(0, 0, -hang))
+        in_part = (self.machine.Material.Placement * sim.WorkpieceHolder).inverse().multVec(in_machine)
+        for i in range(3):
+            self.assertAlmostEqual(centre[i], in_part[i], delta=1e-3,
+                                   msg="%r is not %r" % (in_part, centre))
+
+    def test_no_vice_is_the_job_origin_on_the_table(self):
+        sim = self.simulation
+        identity = FreeCAD.Placement()
+        for i in range(3):
+            self.assertAlmostEqual(identity.Base[i], sim.WorkpieceHolder.Base[i], delta=1e-12)
+        self.assertEqual(0.0, sim.WorkpieceHolder.Rotation.Angle)
+        #the identity is handed over all the same, and the library reads it as no holder at all
+        scaled = sim.Proxy.options(sim).workpiece_holder()
+        self.assertEqual(tuple(1.0 if i % 5 == 0 else 0.0 for i in range(16)), scaled)
+
     def test_a_step_moves_the_machine_and_the_machine_only(self):
         self.simulation.Step = 0
         first = FreeCAD.Vector(self.machine.ToolMount.Placement.Base)

@@ -53,7 +53,7 @@ class Options(object):
     def __init__(self, unit_in_mm=1000.0, holder_length_mm=50.0, holder_radius_mm=30.0,
                  check_limits=True, check_collisions=True, interpolate=True, max_step_mm=None,
                  max_turn_degrees=None, start=None, rotary_letters=None, gauge_length_mm=0.0,
-                 holder_model=""):
+                 holder_model="", workpiece_holder_mm=None):
         self.unit_in_mm = float(unit_in_mm)
         self.holder_length_mm = float(holder_length_mm)
         self.holder_radius_mm = float(holder_radius_mm)
@@ -65,6 +65,15 @@ class Options(object):
         #tool branch ends where a holder is clamped, so this is what decides where the tip is;
         #0 stands the tool right up against its holder, which is a guess and not a measurement.
         self.gauge_length_mm = float(gauge_length_mm)
+        #The vice, the chuck, the plate the part is bolted to: 16 doubles in the layout of
+        #Chain.frames(), from the frame the moves are given in to the terminal of the workpiece
+        #branch, with the translation in millimetres like everything else here. None is the part
+        #sitting on the table with nothing in between.
+        self.workpiece_holder_mm = (None if workpiece_holder_mm is None
+                                    else tuple(float(v) for v in workpiece_holder_mm))
+        if self.workpiece_holder_mm is not None and len(self.workpiece_holder_mm) != 16:
+            raise ValueError("a workpiece holder is 16 doubles, not %d"
+                             % len(self.workpiece_holder_mm))
         self.check_limits = bool(check_limits)
         self.check_collisions = bool(check_collisions)
         self.interpolate = bool(interpolate)
@@ -79,6 +88,15 @@ class Options(object):
                                                 or any(c not in "ABC" for c in self.rotary_letters)):
             raise ValueError("the rotary letters are two of A, B and C, such as AC, not %r"
                              % rotary_letters)
+
+    def workpiece_holder(self):
+        """The holder in the unit of the chain file, or None: only its translation is a length."""
+        if self.workpiece_holder_mm is None:
+            return None
+        m = list(self.workpiece_holder_mm)
+        for i in (12, 13, 14):
+            m[i] /= self.unit_in_mm
+        return tuple(m)
 
     def settings(self):
         """The settings of kin5ax these options ask for, on top of the ones the library recommends."""
@@ -382,6 +400,9 @@ def solve(chain, moves, tool_model, options, keep=False):
         raise ValueError("there is no tool to check collisions with: pick a tool controller, or "
                          "switch the check off")
     scale = options.unit_in_mm
+    #where the part is held: the moves are in the frame of the part, and this says where that frame
+    #sits on the machine. Set every time, so that a holder taken off is taken off.
+    chain.set_workpiece_holder(options.workpiece_holder())
     positions, axes = [], []
     for move in moves:
         programmed = tool_model.programmed_point(move.point, move.axis) if tool_model else move.point

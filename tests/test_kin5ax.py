@@ -674,6 +674,117 @@ class TheHolderOfAToolModel(unittest.TestCase):
             tool.close()
 
 
+def vice_frame(lift=80.0, quarter_turn=True):
+    """A vice that holds the part `lift` above the table, its jaws a quarter turn about OZ.
+
+    16 doubles in the layout of Chain.frames(): the rows are the images of the
+    axes and the last row is the origin.
+    """
+    m = [0.0] * 16
+    if quarter_turn:
+        m[1], m[4] = 1.0, -1.0              #OX of the part along the OY of the table
+    else:
+        m[0], m[5] = 1.0, 1.0
+    m[10] = 1.0
+    m[14] = lift
+    m[15] = 1.0
+    return tuple(m)
+
+
+@needs_library
+@needs_chain
+class TheWorkpieceHolder(unittest.TestCase):
+    """The vice: where the frame the moves are given in sits on the table of the machine.
+
+    It is the mirror image of the gauge length of a tool. A cutter location says
+    nothing about where the part is held, so the holder is what the machine has
+    to know, and everything the library answers about a location is in the frame
+    of the part either way.
+    """
+
+    def setUp(self):
+        self.chain = kin5ax.Chain(CHAIN)
+        self.tool = kin5ax.Tool(kin5ax.TOOL_BALL_NOSE, 0.016, 0.016, 0.064, 0.030, 0.050, 0.030)
+
+    def tearDown(self):
+        self.tool.close()
+        self.chain.close()
+
+    def test_a_chain_starts_with_the_part_on_the_table(self):
+        identity = tuple(1.0 if i % 5 == 0 else 0.0 for i in range(16))
+        self.assertEqual(identity, self.chain.workpiece_holder())
+        self.chain.set_workpiece_holder(None)
+        self.assertEqual(identity, self.chain.workpiece_holder(), "None is the identity")
+
+    def test_the_holder_comes_back_as_it_was_given(self):
+        frame = vice_frame(lift=0.08)
+        self.chain.set_workpiece_holder(frame)
+        for given, back in zip(frame, self.chain.workpiece_holder()):
+            self.assertAlmostEqual(given, back, delta=1e-12)
+
+    def test_a_frame_that_scales_is_no_way_of_holding_anything(self):
+        frame = list(vice_frame(lift=0.08, quarter_turn=False))
+        frame[0] = 2.0
+        with self.assertRaises(kin5ax.Kin5axError) as caught:
+            self.chain.set_workpiece_holder(frame)
+        self.assertIn("rigid", caught.exception.message)
+
+    def test_lifting_the_part_lowers_what_the_machine_reports(self):
+        q = q_inside_limits(self.chain)
+        on_the_table, axis = self.chain.tool_point(q, self.tool)
+        self.chain.set_workpiece_holder(vice_frame(lift=0.08, quarter_turn=False))
+        in_the_vice, turned = self.chain.tool_point(q, self.tool)
+        self.assertAlmostEqual(on_the_table[0], in_the_vice[0], delta=1e-12)
+        self.assertAlmostEqual(on_the_table[1], in_the_vice[1], delta=1e-12)
+        self.assertAlmostEqual(on_the_table[2] - 0.08, in_the_vice[2], delta=1e-12,
+                               msg="the part came up to meet the tool")
+        for i in range(3):
+            self.assertAlmostEqual(axis[i], turned[i], delta=1e-12, msg="a lift turns nothing")
+
+    def test_a_location_is_solved_in_the_frame_of_the_part(self):
+        """The whole point: the moves are the part's, and where it is held is the machine's."""
+        q = q_inside_limits(self.chain)
+        target, axis = self.chain.tool_point(q, self.tool)
+        self.chain.set_workpiece_holder(vice_frame(lift=0.08))
+        settings = kin5ax.Settings.default()
+        settings.check_collisions = 0        #the holder meets the head boxes of the models
+        solutions, status = self.chain.solve_location(target, axis, settings, self.tool)
+        self.assertTrue(solutions, "the location is reachable with the part on a vice too")
+        for solution in solutions:
+            back, back_axis = self.chain.tool_point(solution, self.tool)
+            for i in range(3):
+                self.assertAlmostEqual(target[i], back[i], delta=1e-9)
+                self.assertAlmostEqual(axis[i], back_axis[i], delta=1e-9)
+            self.assertGreater(sum(abs(solution[i] - q[i]) for i in range(len(q))), 1e-6,
+                               "the machine stands somewhere else than it did without the vice")
+
+
+@needs_library
+class TheWorkpieceHolderOfTheOptions(unittest.TestCase):
+    """The addon works in millimetres and the chain in its own unit: the holder is scaled once."""
+
+    def test_only_the_translation_is_a_length(self):
+        from kin5axcam import solve
+
+        frame = vice_frame(lift=80.0)
+        options = solve.Options(unit_in_mm=1000.0, workpiece_holder_mm=frame)
+        scaled = options.workpiece_holder()
+        self.assertAlmostEqual(0.08, scaled[14], delta=1e-12)
+        for i in range(12):
+            self.assertAlmostEqual(frame[i], scaled[i], delta=1e-12, msg="a turn has no unit")
+
+    def test_no_holder_stays_no_holder(self):
+        from kin5axcam import solve
+
+        self.assertIsNone(solve.Options().workpiece_holder())
+
+    def test_a_holder_of_the_wrong_size_is_refused_where_it_is_given(self):
+        from kin5axcam import solve
+
+        with self.assertRaises(ValueError):
+            solve.Options(workpiece_holder_mm=(1.0, 2.0, 3.0))
+
+
 @needs_library
 class TheCatalogueOfToolHolders(unittest.TestCase):
     """The holders a five-axis machine usually carries, so that one can be picked from a list.

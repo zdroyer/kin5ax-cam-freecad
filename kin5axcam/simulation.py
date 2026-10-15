@@ -83,6 +83,10 @@ class ObjectSimulation(object):
          "The tool length a control is set with: from the tip of the tool to the place the holder "
          "is clamped, which is where the tool branch of the machine ends. 0 stands the tool right "
          "up against its holder, which is a guess; a real machine is set from a presetter", 0.0),
+        ("App::PropertyPlacement", "WorkpieceHolder",
+         "The vice, the chuck, the plate the part is bolted to: where the frame the job is "
+         "programmed in sits on the table of the machine, which is the end of its workpiece "
+         "branch. The identity is the job's origin on the table itself", None),
         ("App::PropertyBool", "CheckLimits",
          "A configuration outside the joint limits is no solution", True),
         ("App::PropertyBool", "CheckCollisions",
@@ -151,13 +155,17 @@ class ObjectSimulation(object):
          "Without a machine: the part the tool hangs from, placed at every location", None),
         ("App::PropertyLink", "PartFrame",
          "Without a machine: the part holding what is left of the stock and the markers", None),
+        ("App::PropertyLink", "WorkpieceFrame",
+         "The part the workpiece and the markers sit in: placed by WorkpieceHolder on the table of "
+         "the machine", None),
     )
 
     #what the solve and the picture fill in, which nobody edits by hand
     READ_ONLY = ("StepCount", "Joints", "Solved", "Statuses", "Tips", "Axes", "StepOperations",
                  "Report", "Collisions", "Collided", "CollidedEver", "RemovedVolume", "Gouges",
                  "FirstGouge", "Tool", "Holder",
-                 "Workpiece", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
+                 "Workpiece", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame",
+                 "WorkpieceFrame")
 
     def __init__(self, obj, machine_object, job):
         obj.Proxy = self
@@ -239,6 +247,28 @@ class ObjectSimulation(object):
         machine_object = obj.Machine
         return getattr(machine_object, "HolderModel", "") or "" if machine_object is not None else ""
 
+    def workpiecePart(self, obj):
+        """The part the workpiece and the markers sit in: the holder on the table of the machine.
+
+        Everything kin5ax answers about a location is in the frame of the part,
+        and the holder is what stands between that frame and the table, so the
+        drawn part hangs in a part of its own placed by it. Without a machine
+        there is no table to hold anything to, and the frame of the part is the
+        whole picture.
+        """
+        material = self.materialPart(obj)
+        if obj.Machine is None:
+            return material
+        frame = obj.WorkpieceFrame
+        if frame is None:
+            frame = obj.Document.addObject("App::Part", obj.Name + "WorkpieceFrame")
+            frame.Label = "Workpiece holder"
+            material.addObject(frame)
+            obj.WorkpieceFrame = frame
+        frame.Placement = obj.WorkpieceHolder
+        frame.purgeTouched()
+        return frame
+
     def options(self, obj):
         unit = self.unit(obj)
         max_step = _quantity(obj.MaxStep) or None
@@ -247,6 +277,8 @@ class ObjectSimulation(object):
             max_step = self.voxelSize(obj)
         return solve.Options(
             unit_in_mm=unit,
+            #the options take millimetres and scale at the boundary, so the frame is made unscaled
+            workpiece_holder_mm=machine.frame_of(obj.WorkpieceHolder, 1.0),
             holder_model=self.holderModel(obj),
             holder_length_mm=_quantity(obj.HolderLength),
             holder_radius_mm=_quantity(obj.HolderRadius),
@@ -373,7 +405,8 @@ class ObjectSimulation(object):
         finally:
             tool.close()
 
-    OWNED = ("Tool", "Holder", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame")
+    OWNED = ("Tool", "Holder", "Unreachable", "Surface", "GougeMarker", "ToolFrame", "PartFrame",
+             "WorkpieceFrame")
 
     def clearPicture(self, obj):
         """Takes every object this simulation put in the document out again.
@@ -418,7 +451,7 @@ class ObjectSimulation(object):
                 obj.Document.removeObject(stale.Name)
             obj.Workpiece = []
             return
-        material = obj.Machine.Material
+        material = self.workpiecePart(obj)
         wanted = []
         job = obj.Job
         if hasattr(job, "Model") and job.Model is not None:
@@ -461,7 +494,7 @@ class ObjectSimulation(object):
         if marker is None:
             marker = obj.Document.addObject("Part::Feature", obj.Name + "Unreachable")
             marker.Label = "Unreachable locations"
-            self.materialPart(obj).addObject(marker)
+            self.workpiecePart(obj).addObject(marker)
             view = getattr(marker, "ViewObject", None)
             if view is not None:
                 view.PointColor = (1.0, 0.0, 0.0)
@@ -676,7 +709,7 @@ class ObjectSimulation(object):
         if surface is None:
             surface = obj.Document.addObject("Mesh::Feature", obj.Name + "Surface")
             surface.Label = "What is left of the stock"
-            self.materialPart(obj).addObject(surface)
+            self.workpiecePart(obj).addObject(surface)
             obj.Surface = surface
             view = getattr(surface, "ViewObject", None)
             if view is not None:
@@ -705,7 +738,7 @@ class ObjectSimulation(object):
         if marker is None:
             marker = obj.Document.addObject("Part::Feature", obj.Name + "Gouge")
             marker.Label = "First gouge"
-            self.materialPart(obj).addObject(marker)
+            self.workpiecePart(obj).addObject(marker)
             view = getattr(marker, "ViewObject", None)
             if view is not None:
                 view.PointColor = (1.0, 0.3, 0.0)
@@ -941,6 +974,9 @@ class ObjectSimulation(object):
                 self.pose(obj)
             except Exception as problem:
                 FreeCAD.Console.PrintError("kin5axcam: the simulation cannot be posed: %s\n" % problem)
+        elif prop == "WorkpieceHolder" and getattr(obj, "WorkpieceFrame", None) is not None:
+            #the part moved in its holder: the picture follows at once, the solve on the recompute
+            obj.WorkpieceFrame.Placement = obj.WorkpieceHolder
         elif prop == "Machine" and hasattr(obj, "Tool") and not self.pictureBelongsToTheMachine(obj):
             #the old picture hangs from the old machine: down with it, the recompute builds it anew
             self.clearPicture(obj)

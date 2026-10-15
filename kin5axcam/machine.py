@@ -69,6 +69,20 @@ def placement_of(frame, unit_in_mm):
         0.0, 0.0, 0.0, 1.0))
 
 
+def frame_of(placement, unit_in_mm):
+    """A FreeCAD Placement as a frame of kin5ax: 16 doubles in the layout OpenGL uses.
+
+    The way back from placement_of, with the lengths scaled into the unit of the
+    chain file.
+    """
+    m = placement.Matrix
+    s = unit_in_mm
+    return (m.A11, m.A21, m.A31, 0.0,
+            m.A12, m.A22, m.A32, 0.0,
+            m.A13, m.A23, m.A33, 0.0,
+            m.A14 / s, m.A24 / s, m.A34 / s, 1.0)
+
+
 class ObjectMachine(object):
     """The proxy of the machine group: builds the parts once, places them on every configuration."""
 

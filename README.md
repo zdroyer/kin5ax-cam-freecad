@@ -200,7 +200,10 @@ the line would have been, a count at the end of the operation, and a warning in 
 |---|---|
 | `--machine-unit mm\|m\|in` | takes the chain file to be in that unit instead of the one it declares; for testing, since every file says |
 | `--rotary-letters AC` | what the control calls the two rotary axes; the default is the names of the links when they are letters |
-| `--holder-length 50`, `--holder-radius 30` | the holder, in mm, which a tool bit of FreeCAD does not describe |
+| `--holder-model "BT40 ER32"` | the designation on the tool holder: one kin5ax has the sizes of, and then those are used; any other name is carried as the name of a holder of your own. The default takes the holder the machine file names |
+| `--holder-length 50`, `--holder-radius 30` | that holder, in mm, when it is not one of the catalogue: a tool bit of FreeCAD does not describe one |
+| `--gauge-length 250` | the tool length a control is set with, in mm: from the tip to the place the holder is clamped, which is where the machine's tool branch ends. The default stands the tool right up against its holder, which is a guess |
+| `--workpiece-holder "0,0,80"` | where the frame the job is programmed in sits on the table of the machine: a vice, a chuck, a plate. `"x,y,z"` or `"x,y,z,ax,ay,az,deg"`. The default is the origin of the job on the table itself |
 | `--no-limits`, `--no-collisions` | leave a check out |
 | `--start MIN\|MAX\|MIN_ABS\|SHORTEST` | where the trajectory starts, by the first rotary axis |
 
@@ -334,9 +337,25 @@ is the tool reorienting at one point: the swing of a lead angle at the end of a 
 way through a singular direction of a wrist — in one go and says how many it passed; the cut is made
 at every one of them either way. *Every location* draws them all.
 
-Properties worth knowing: `Operations` (none means every active operation of the job), the holder
-the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and
-`Start`. The unit of the chain file is on the machine, `UnitInMillimetres`, read from the file.
+Properties worth knowing: `Operations` (none means every active operation of the job), the two
+checks, `Interpolate` with `MaxStep` and `MaxTurn`, and `Start`. The unit of the chain file is on
+the machine, `UnitInMillimetres`, read from the file.
+
+Three of them say where the tool and the work are, which a chain file does not:
+
+- `HolderModel`, `HolderLength` and `HolderRadius` — the holder between the tool and the spindle,
+  which a tool bit of FreeCAD does not describe. A designation kin5ax has the sizes of (`BT40 ER32`,
+  `HSK63A SF12` and eight more) brings three cylinders with it, and then the two lengths are that
+  holder's; any other name is a holder of your own, described by them. Empty takes the holder the
+  machine file says its machine carries.
+- `GaugeLength` — the tool length a control is set with, from the tip of the tool to the place the
+  holder is clamped, which is where the machine's tool branch ends. That is the measurement that
+  ties a tool to a machine, and it is a measurement: 0 stands the tool right up against its holder,
+  which is a guess and is said to be one.
+- `WorkpieceHolder` — where the frame the job is programmed in sits on the end of the machine's
+  workpiece branch: a vice, a chuck, a plate the part is bolted to. The identity, which it starts
+  at, is the origin of the job on the table itself. The workpiece and the cut hang in a part placed
+  by it, so the picture and the solve agree about where the part is.
 
 **With no machine at all.** Leave `Machine` empty — the simulate command does, when the document has
 no machine — and there is nothing to solve: the path itself is the trajectory, made as dense as the

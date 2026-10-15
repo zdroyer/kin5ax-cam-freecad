@@ -10,7 +10,7 @@
     the document, read from a kinematic chain file, and the job played on it: every location solved,
     the collisions named and shown, and the stock cut away as the tool passes.
   </description>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <date>2026-10-15</date>
   <maintainer email="zdroyer@gmail.com">Przemysław Zdroik</maintainer>
   <license file="LICENSE">MIT</license>

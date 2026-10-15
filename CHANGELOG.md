@@ -10,6 +10,49 @@ the two are released together.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-15
+
+Carries kin5ax 0.3.0, and needs it: the binding refuses 0.2.
+
+The two ends of a machine mean something else than they did. Read the first item before opening a
+document made with 0.2.0 on a machine of your own.
+
+### Changed
+
+- **The end of a machine's tool branch is the tool mount, in every chain file.** It used to be the
+  tool point in a file that named no tool holder and the mount in a file that named one, so the same
+  element of the same format meant two different places and the two halves of this project
+  disagreed about which: the chain editor hung the tool from the terminal, this addon hung a holder
+  and a tool below it, on the same machine file. Now the tool point hangs the **gauge length** of
+  the tool below the mount - the tip-to-mount measurement a presetter gives and a control is set
+  with, `GaugeLength` on a simulation and `--gauge-length` on the postprocessor - and 0 stands the
+  tool right up against its holder, which is a guess and is said to be one. A machine file of your
+  own whose tool terminal was drawn at the tool point now puts the tool one assembly too low: move
+  that terminal up to where a holder is really clamped.
+- The shipped machines of the three real machines name the holder their taper takes, and every
+  shipped file's embedded DTD describes the sections a holder can have.
+
+### Added
+
+- **The tool holder is named and shaped.** A holder is up to three cylinders hanging from the mount
+  plus the designation on it, and kin5ax has the sizes of ten common ones: `HolderModel` on a
+  simulation, `--holder-model` on the postprocessor, `kin5ax.holder_catalogue()` and
+  `kin5ax.holder_by_model()` in the binding. A name the catalogue knows decides the holder's length
+  and radius instead of `HolderLength` and `HolderRadius`; any other name is carried as the
+  designation of a holder of your own, described by those two. Empty takes the holder the machine
+  file says its machine carries.
+- The picture draws every cylinder of the holder, hanging from the mount, which is where the
+  collision test has it: the slim nose of a collet chuck clears what its flange would not.
+- **The part can be held somewhere else than on the table.** `WorkpieceHolder` on a simulation is a
+  placement: where the frame the job is programmed in sits on the end of the machine's workpiece
+  branch - a vice, a chuck, a plate - and the identity, which it starts at, is the origin of the job
+  on the table itself. The workpiece, the cut cloud and the markers hang in a part placed by it, the
+  solve and the postprocessor agree with the picture, and the machine stands wherever it has to
+  stand to touch the same point of the part. The postprocessor takes
+  `--workpiece-holder "x,y,z"` or `"x,y,z,ax,ay,az,deg"`.
+- `Chain.default_holder_model()`, `Chain.default_holder()`, `Tool.set_holder()`,
+  `Chain.set_workpiece_holder()` and `Chain.workpiece_holder()` in the binding.
+
 ## [0.2.0] — 2026-10-15
 
 Carries kin5ax 0.2.0, and needs it: the binding refuses 0.1.
@@ -72,6 +115,7 @@ this is the point at which it became one of its own.
 - **The kin5ax shared library** for Windows and Linux under `lib/`, so that the addon works as
   installed.
 
-[Unreleased]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zdroyer/kin5ax-cam-freecad/releases/tag/v0.1.0

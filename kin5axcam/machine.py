@@ -32,6 +32,7 @@ its lengths are in, and the machines shipped with kin5ax are metres, so 1000.
 
 import math
 import os
+import re
 
 import FreeCAD
 
@@ -75,7 +76,17 @@ class ObjectMachine(object):
     #filled by build() and left empty here
     PROPERTIES = (
         ("App::PropertyFile", "ChainFile",
-         "The kinematic chain file of kin5ax this machine is read from (.kc or .kc.json)", None),
+         "The machine this is read from: a kinematic chain of kin5ax (.kc or .kc.json), or a "
+         "FreeCAD machine definition (.fcm)", None),
+        ("App::PropertyStringList", "FcmRemarks",
+         "What reading a FreeCAD machine file could not carry across into a kinematic chain; "
+         "empty for a .kc file and for a conversion that carried everything", None),
+        ("App::PropertyBool", "NegateTableLinearAxes",
+         "An .fcm file cannot say which way a machine counts a table axis, and it cannot be "
+         "guessed: set this when a linear axis under the workpiece runs the other way", False),
+        ("App::PropertyBool", "NegateTableRotaryAxes",
+         "The same for a rotary axis under the workpiece. Wrong, a part comes out mirrored",
+         False),
         ("App::PropertyFloat", "UnitInMillimetres",
          "How many millimetres one length unit of the chain file is: 1000 for metres", 1000.0),
         ("App::PropertyFloatList", "Configuration",
@@ -116,7 +127,7 @@ class ObjectMachine(object):
         #the file says what its lengths are in; a value given here overrides it, for a test that
         #wants to see a machine at another scale
         if unit_in_mm is None:
-            with kin5ax.Chain(chain_file) as chain:
+            with openChain(chain_file, obj) as chain:
                 unit_in_mm = chain.unit_in_mm()
         obj.UnitInMillimetres = float(unit_in_mm)
         obj.ArmRadius = 0.0
@@ -145,7 +156,7 @@ class ObjectMachine(object):
         if chain is None or chain.file_path != obj.ChainFile:
             if chain is not None:
                 chain.close()
-            chain = kin5ax.Chain(obj.ChainFile)
+            chain = openChain(obj.ChainFile, obj)
             self._chain = chain
         return chain
 
@@ -524,6 +535,101 @@ def remember_machine_folder(path):
     folder = os.path.dirname(os.path.abspath(path))
     if os.path.isdir(folder):
         FreeCAD.ParamGet(PARAMETERS).SetString("LastMachineFolder", folder)
+
+
+def isFcm(chain_file):
+    """Whether that path is a FreeCAD machine definition rather than a chain of kin5ax.
+
+    By the extension, unlike the chain files of kin5ax, which the library tells
+    apart by their content: an .fcm is JSON and so is a .kc.json, and the two
+    describe a machine in ways that have nothing in common, so guessing would
+    be the kind of cleverness that is wrong once and silently.
+    """
+    return os.path.splitext(chain_file)[1].lower() == ".fcm"
+
+
+def openChain(chain_file, obj=None):
+    """The chain of that file, through the .fcm bridge when it is one.
+
+    obj, when given, carries the two conventions an .fcm file cannot state and
+    receives the remarks of the conversion, so that whoever opened the machine
+    can be shown what the file could not carry across.
+    """
+    if not isFcm(chain_file):
+        return kin5ax.Chain(chain_file)
+    options = kin5ax.FcmOptions.default()
+    if obj is not None:
+        options.negate_table_linear_axes = 1 if getattr(obj, "NegateTableLinearAxes", False) else 0
+        options.negate_table_rotary_axes = 1 if getattr(obj, "NegateTableRotaryAxes", False) else 0
+    chain = kin5ax.Chain.from_fcm(chain_file, options)
+    if obj is not None and hasattr(obj, "FcmRemarks"):
+        obj.FcmRemarks = chain.fcm_remarks()
+    return chain
+
+
+def collisionBoxCount(chain):
+    """How many collision boxes the whole machine has. None at all is worth saying out loud.
+
+    A FreeCAD machine file has no room for them, so a machine imported from one
+    is a stick figure: the collision check of a simulation runs against nothing
+    and finds nothing, whatever the tool does. That is not a failure anybody
+    would notice by watching.
+    """
+    boxes = 0
+    for part in (kin5ax.PART_TOOL, kin5ax.PART_MATERIAL_HOLDER):
+        for index in range(len(chain.frames(part))):
+            boxes += len(chain.segment_boxes(part, index))
+    return boxes
+
+
+def groupedRemarks(remarks):
+    """The remarks of an import, with the one that repeats per axis said once.
+
+    FreeCAD keeps a few scheduling fields on every axis - how fast it may move,
+    which solution it prefers, whether it may flip - and a kinematic chain has no
+    place for any of them, so the bridge reports one drop per axis per field.
+    That is right of the bridge and wrong in front of a user: eleven identical
+    lines for an ordinary five-axis machine, and the one remark that matters,
+    that the machine has no collision boxes, pushed off the bottom. They are said
+    once here, naming the fields. The full list stays on the machine as
+    FcmRemarks for whoever wants it.
+    """
+    dropped = []
+    kept = []
+    for line in remarks:
+        found = re.match(r"axis '[^']*': '([^']*)' is not part of a kinematic chain", line)
+        if found:
+            if found.group(1) not in dropped:
+                dropped.append(found.group(1))
+        else:
+            kept.append(line)
+    if dropped:
+        kept.append("the fields FreeCAD keeps on its axes that a kinematic chain has no place for "
+                    "were dropped: " + ", ".join(dropped))
+    return kept
+
+
+def importRemarks(obj):
+    """Everything worth saying about a machine that was converted rather than read.
+
+    The remarks of the bridge first, which are the library's own account of what
+    an .fcm file and a kinematic chain cannot both hold. Then one of this addon's
+    own, because the addon is the half that offers a collision check: an .fcm has
+    no collision boxes at all, so the check would run against nothing and find
+    nothing, and a run that finds nothing looks exactly like a run that is safe.
+    """
+    lines = groupedRemarks(getattr(obj, "FcmRemarks", []) or [])
+    if not isFcm(obj.ChainFile):
+        return lines
+    try:
+        if collisionBoxCount(obj.Proxy.chain(obj)) == 0:
+            lines.append(
+                "This machine has no collision boxes, which a FreeCAD machine file cannot carry. "
+                "A simulation of it will not find any collision, whatever the tool does. Add "
+                "boxes in the kin5ax chain editor, or treat the check as switched off.")
+    except Exception as problem:            #a machine that will not open has worse troubles
+        FreeCAD.Console.PrintWarning("kin5axcam: the boxes cannot be counted: %s\n" % problem)
+    return lines
 
 
 def Create(name, chain_file, unit_in_mm=None, document=None):

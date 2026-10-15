@@ -2,8 +2,11 @@
 
 Two commands, registered with FreeCAD when this module is imported:
 
-- **CAM_Kin5axMachine** asks for a chain file of kin5ax and puts the machine in
-  the active document, standing at zero.
+- **CAM_Kin5axMachine** asks for a machine file and puts the machine in the
+  active document, standing at zero. A kinematic chain of kin5ax (.kc, .kc.json)
+  or a FreeCAD machine definition (.fcm); the second is converted, which is
+  lossy, and what it could not carry across is shown and kept on the machine as
+  ``FcmRemarks``.
 - **CAM_Kin5axSimulate** takes the job and the machine - the selected ones, or
   the only ones in the document - makes a simulation of the one on the other,
   runs it, and opens the player.
@@ -89,6 +92,27 @@ def the_one(candidates, selected, what):
     return None
 
 
+importRemarks = machine.importRemarks
+
+
+def showImportRemarks(obj):
+    """Puts them in the report view, and in front of the user when there are any.
+
+    The same bargain the chain editor makes: a conversion that carried everything
+    says nothing at all, and one that did not is not left for somebody to find in
+    a log after the part is cut.
+    """
+    lines = importRemarks(obj)
+    if not lines:
+        return
+    for line in lines:
+        FreeCAD.Console.PrintWarning("kin5axcam: %s\n" % line)
+    QtGui.QMessageBox.information(
+        FreeCADGui.getMainWindow(),
+        translate("Kin5axMachine", "The machine was read, with these remarks"),
+        "- " + "\n\n- ".join(lines))
+
+
 class CommandMachine(object):
     """CAM_Kin5axMachine: a machine from a chain file."""
 
@@ -97,9 +121,10 @@ class CommandMachine(object):
             "Pixmap": icon("Kin5axMachine"),
             "MenuText": QT_TRANSLATE_NOOP("CAM_Kin5axMachine", "Machine from kin5ax"),
             "ToolTip": QT_TRANSLATE_NOOP("CAM_Kin5axMachine",
-                                         "Put a five-axis machine of kin5ax in the document, from its "
-                                         "kinematic chain file (.kc or .kc.json). Fourteen machines "
-                                         "come with the addon, and the dialog opens on them"),
+                                         "Put a five-axis machine in the document, from a kinematic "
+                                         "chain of kin5ax (.kc, .kc.json) or a FreeCAD machine "
+                                         "definition (.fcm). Fourteen machines come with the addon, "
+                                         "and the dialog opens on them"),
         }
 
     def IsActive(self):
@@ -107,8 +132,10 @@ class CommandMachine(object):
 
     def Activated(self):
         path, _ = QtGui.QFileDialog.getOpenFileName(
-            FreeCADGui.getMainWindow(), translate("Kin5axMachine", "The kinematic chain of the machine"),
-            machine_folder(), "kin5ax chain files (*.kc.json *.kc);;All files (*)")
+            FreeCADGui.getMainWindow(), translate("Kin5axMachine", "The machine"),
+            machine_folder(),
+            "machines (*.kc.json *.kc *.fcm);;kin5ax chain (*.kc.json *.kc);;"
+            "FreeCAD machine (*.fcm);;All files (*)")
         if not path:
             return
         remember_machine_folder(path)
@@ -123,6 +150,7 @@ class CommandMachine(object):
             return
         document.commitTransaction()
         FreeCADGui.SendMsgToActiveView("ViewFit")
+        showImportRemarks(obj)
         return obj
 
 

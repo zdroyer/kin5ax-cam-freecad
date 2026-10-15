@@ -16,6 +16,12 @@ authority on what each call means.
             if location.has_solution:
                 print(location.q)
 
+**A FreeCAD machine file** (``.fcm``) opens through ``Chain.from_fcm``, which is
+the bridge of ``kin5axfcm.h``. The conversion is lossy and says so:
+``Chain.fcm_remarks()`` is what it could not carry across, and a host that
+ignores it hides from its user the difference between the machine in the file
+and the machine about to be solved for.
+
 **Lengths are in the unit of the chain file**, and every file says which:
 ``Chain.unit_in_mm()`` is what to multiply by, 1000 for the metres every machine
 shipped with the library is in. Nothing here converts: the caller scales on the
@@ -106,6 +112,9 @@ UNIT_M = 1
 UNIT_IN = 2
 UNIT_NAMES = {UNIT_MM: "mm", UNIT_M: "m", UNIT_IN: "in"}
 
+#the longest remark the .fcm bridge hands over, terminating zero included (K5_REMARK_MAX)
+REMARK_MAX = 512
+
 #k5_tool_shape
 TOOL_BALL_NOSE = 0                      #a ball of radius r at the tip, programmed at its centre
 TOOL_FLAT_END = 1                       #a cylinder of radius rz, programmed at the tip
@@ -175,6 +184,37 @@ class Settings(ctypes.Structure):
         settings = cls()
         load(library_path).k5_settings_default(ctypes.byref(settings))
         return settings
+
+
+class FcmOptions(ctypes.Structure):
+    """k5_fcm_options: what a FreeCAD machine file cannot say and the conversion has to be told.
+
+    The two negate flags are the one convention that cannot be read from an
+    .fcm and cannot be guessed either: a machine may count a table axis the
+    other way round from the model, and only somebody who has the real machine
+    knows. Off is right for every file seen so far, and wrong silently when it
+    is not - a part would be cut mirrored.
+    """
+
+    _fields_ = [
+        ("negate_table_linear_axes", ctypes.c_int),
+        ("negate_table_rotary_axes", ctypes.c_int),
+        ("_machine_name", ctypes.c_char_p),
+        ("_template_file_path", ctypes.c_char_p),
+    ]
+
+    @classmethod
+    def default(cls, library_path=None):
+        options = cls()
+        load(library_path).k5_fcm_options_default(ctypes.byref(options))
+        return options
+
+    def with_names(self, machine_name=None, template_file_path=None):
+        """The strings, kept alive on the object: ctypes would otherwise free them under C."""
+        self._kept = (None if machine_name is None else _encode_path(machine_name),
+                      None if template_file_path is None else _encode_path(template_file_path))
+        self._machine_name, self._template_file_path = self._kept
+        return self
 
 
 class Link(ctypes.Structure):
@@ -454,6 +494,18 @@ def _declare(lib):
     lib.k5_chain_is_5c.argtypes = [_chain_t, _int_p]
     lib.k5_chain_unit.restype = ctypes.c_int
     lib.k5_chain_unit.argtypes = [_chain_t, _int_p]
+    #kin5axfcm.h: the FreeCAD machine file bridge, a header of its own over the same library
+    lib.k5_fcm_options_default.restype = None
+    lib.k5_fcm_options_default.argtypes = [ctypes.POINTER(FcmOptions)]
+    lib.k5_chain_open_fcm.restype = ctypes.c_int
+    lib.k5_chain_open_fcm.argtypes = [ctypes.c_char_p, ctypes.POINTER(FcmOptions),
+                                      ctypes.POINTER(_chain_t)]
+    lib.k5_chain_write_fcm.restype = ctypes.c_int
+    lib.k5_chain_write_fcm.argtypes = [_chain_t, ctypes.POINTER(FcmOptions), ctypes.c_char_p]
+    lib.k5_fcm_remark_count.restype = ctypes.c_int
+    lib.k5_fcm_remark_count.argtypes = [_chain_t, _size_p]
+    lib.k5_fcm_remark.restype = ctypes.c_int
+    lib.k5_fcm_remark.argtypes = [_chain_t, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
     lib.k5_unit_in_millimetres.restype = ctypes.c_int
     lib.k5_unit_in_millimetres.argtypes = [ctypes.c_int, _double_p]
     lib.k5_chain_link_count.restype = ctypes.c_int
@@ -806,6 +858,52 @@ class Chain(object):
         _check(self._lib, self._lib.k5_unit_in_millimetres(self.unit(), ctypes.byref(out)),
                "k5_unit_in_millimetres")
         return out.value
+
+    @classmethod
+    def from_fcm(cls, file_path, options=None, library_path=None):
+        """A machine read from a FreeCAD machine file (.fcm), with the remarks of the conversion.
+
+        The chain comes back in millimetres, since that is what an .fcm is, and
+        ``fcm_remarks()`` says what the conversion could not carry across. Read
+        them: an .fcm has no collision boxes at all, so a machine imported from
+        one is a stick figure and a collision check against it finds nothing.
+        It may also not be a five-axis machine - FreeCAD describes three-axis
+        ones too - so ask ``is_5c()`` before solving anything on it.
+        """
+        chain = cls.__new__(cls)
+        chain._lib = load(library_path)
+        chain._handle = _chain_t()
+        chain.file_path = file_path
+        _check(chain._lib, chain._lib.k5_chain_open_fcm(
+            _encode_path(file_path), ctypes.byref(options) if options is not None else None,
+            ctypes.byref(chain._handle)), "k5_chain_open_fcm")
+        return chain
+
+    def write_fcm(self, file_path, options=None):
+        """This machine as a FreeCAD machine file, its lengths scaled into millimetres.
+
+        The remarks of this conversion replace whatever ``fcm_remarks()`` held.
+        """
+        _check(self._lib, self._lib.k5_chain_write_fcm(
+            self._handle, ctypes.byref(options) if options is not None else None,
+            _encode_path(file_path)), "k5_chain_write_fcm")
+
+    def fcm_remarks(self):
+        """What the last .fcm conversion of this chain could not carry across, one line each.
+
+        Empty for a chain that has been through none, and empty for a conversion
+        that carried everything. Reading or writing, whichever happened last.
+        """
+        count = ctypes.c_size_t()
+        _check(self._lib, self._lib.k5_fcm_remark_count(self._handle, ctypes.byref(count)),
+               "k5_fcm_remark_count")
+        remarks = []
+        for index in range(count.value):
+            out = ctypes.create_string_buffer(REMARK_MAX)
+            _check(self._lib, self._lib.k5_fcm_remark(self._handle, index, out, REMARK_MAX),
+                   "k5_fcm_remark")
+            remarks.append(out.value.decode("utf-8", "replace"))
+        return remarks
 
     def link_count(self):
         out = ctypes.c_size_t()

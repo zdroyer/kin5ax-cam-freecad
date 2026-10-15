@@ -528,3 +528,92 @@ class TheCutting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@needs_library
+@needs_chain
+class TheFreeCadMachineFileBridge(unittest.TestCase):
+    """kin5axfcm.h through the binding: a FreeCAD machine file in, a chain out, and the remarks.
+
+    The conversion itself is tested in C++. What is tested here is that a host can
+    reach it and, above all, can read what it could not carry: a bridge whose
+    remarks never arrive is a bridge that converts silently, and what it drops is
+    the difference between the machine in the file and the machine being solved for.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self.folder = tempfile.mkdtemp(prefix="kin5axcam_fcm_")
+        self.written = os.path.join(self.folder, "written.fcm")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def a_machine_file(self):
+        """One written by the bridge itself, from the trunnion table of the test set."""
+        with kin5ax.Chain(CHAIN) as chain:
+            chain.write_fcm(self.written)
+            return chain.fcm_remarks()
+
+    def test_writing_one_says_what_it_could_not_carry(self):
+        remarks = self.a_machine_file()
+        self.assertTrue(os.path.isfile(self.written))
+        self.assertTrue(remarks, "an .fcm holds no collision boxes and this said nothing")
+        joined = " ".join(remarks)
+        self.assertIn("collision boxes", joined)
+        self.assertIn("tool reference point", joined,
+                      "the tool terminal does not survive and has to be said")
+
+    def test_reading_one_gives_a_chain_in_millimetres(self):
+        self.a_machine_file()
+        chain = kin5ax.Chain.from_fcm(self.written)
+        try:
+            self.assertEqual(kin5ax.UNIT_MM, chain.unit(), "an .fcm is millimetres by definition")
+            self.assertEqual(1.0, chain.unit_in_mm())
+            self.assertTrue(chain.is_5c())
+            self.assertEqual(kin5ax.AXES, len(chain.links()))
+        finally:
+            chain.close()
+
+    def test_the_remarks_of_reading_are_the_remarks_of_the_last_conversion(self):
+        self.a_machine_file()
+        chain = kin5ax.Chain.from_fcm(self.written)
+        try:
+            reading = chain.fcm_remarks()
+            self.assertNotIn("collision boxes", " ".join(reading),
+                             "those belonged to writing the file, not to reading it")
+            #the fields FreeCAD keeps that a kinematic chain has no place for
+            self.assertTrue(reading, "the file carries max_velocity and the rest, and they are dropped")
+        finally:
+            chain.close()
+
+    def test_a_chain_of_kin5ax_carries_no_remarks(self):
+        with kin5ax.Chain(CHAIN) as chain:
+            self.assertEqual([], chain.fcm_remarks(), "it has been through no conversion")
+
+    def test_the_conventions_a_machine_file_cannot_state_reach_the_conversion(self):
+        """Which way a table axis is counted is not in the file and cannot be guessed; set wrong,
+        a part comes out mirrored, so the option has to be reachable from here."""
+        self.a_machine_file()
+        options = kin5ax.FcmOptions.default()
+        self.assertEqual(0, options.negate_table_rotary_axes)
+        options.negate_table_rotary_axes = 1
+        plain = kin5ax.Chain.from_fcm(self.written)
+        negated = kin5ax.Chain.from_fcm(self.written, options)
+        try:
+            q = [0.5 if link.is_revolute else 0.0 for link in plain.links()]
+            a, _ = plain.tool_point(q)
+            b, _ = negated.tool_point(q)
+            apart = sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+            self.assertGreater(apart, 1e-9, "the same joint values put the tool in the same place")
+        finally:
+            plain.close()
+            negated.close()
+
+    def test_a_file_that_is_not_a_machine_is_refused_with_a_message(self):
+        with self.assertRaises(kin5ax.Kin5axError) as caught:
+            kin5ax.Chain.from_fcm(os.path.join(self.folder, "there_is_no_such_machine.fcm"))
+        self.assertNotEqual("", caught.exception.message)

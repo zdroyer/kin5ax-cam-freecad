@@ -318,3 +318,90 @@ class TheMachinesThatShipWithTheAddon(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@needs_everything
+class AMachineFromAFreeCadMachineFile(unittest.TestCase):
+    """A machine in the document read from an .fcm: the unit, and the remarks a user has to see.
+
+    FreeCAD 1.2 ships its machines as .fcm, so this is the file a FreeCAD user
+    actually has. The conversion is lossy, and the one loss that matters here is
+    the collision boxes: an .fcm has none, so the collision check of a simulation
+    runs against nothing. A run that finds nothing looks exactly like a run that
+    is safe, which is why the machine says so rather than leaving it to be noticed.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        from kin5axcam import machine
+
+        self.document = FreeCAD.newDocument("kin5axcam_fcm_machine")
+        self.folder = tempfile.mkdtemp(prefix="kin5axcam_fcm_")
+        self.fcm = os.path.join(self.folder, "machine.fcm")
+        with kin5ax.Chain(CHAIN) as chain:
+            chain.write_fcm(self.fcm)
+        self.machine = machine.Create("FromFreeCad", self.fcm, document=self.document)
+        self.document.recompute()
+
+    def tearDown(self):
+        import shutil
+
+        FreeCAD.closeDocument(self.document.Name)
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def test_the_unit_is_millimetres_because_that_is_what_the_file_is(self):
+        self.assertEqual(1.0, self.machine.UnitInMillimetres)
+
+    def test_the_remarks_of_the_import_are_kept_on_the_machine(self):
+        remarks = list(self.machine.FcmRemarks)
+        self.assertTrue(remarks, "the file carries fields a kinematic chain has no place for")
+        for line in remarks:
+            self.assertNotEqual("", line.strip())
+
+    def test_what_repeats_for_every_axis_is_said_once_to_the_user(self):
+        """FreeCAD keeps a few scheduling fields on every axis and a chain has no place for any of
+        them, so the bridge reports one drop per axis per field: eleven identical lines for an
+        ordinary machine, which would push the remark that matters off the bottom of the box."""
+        from kin5axcam import machine
+
+        stored = list(self.machine.FcmRemarks)
+        per_axis = [line for line in stored if "is not part of a kinematic chain" in line]
+        self.assertGreater(len(per_axis), 3, "this file drops several fields on several axes")
+
+        shown = machine.importRemarks(self.machine)
+        summarised = [line for line in shown if "has no place for" in line]
+        self.assertEqual(1, len(summarised), shown)
+        self.assertIn("max_velocity", summarised[0])
+        self.assertLess(len(shown), len(stored), "the full list stays on the machine")
+        #and what is not a repeat is left exactly as the bridge said it
+        self.assertTrue(any("collision boxes" in line for line in shown))
+
+    def test_it_says_that_a_collision_check_against_it_would_find_nothing(self):
+        from kin5axcam import machine
+
+        with kin5ax.Chain.from_fcm(self.fcm) as chain:
+            self.assertEqual(0, machine.collisionBoxCount(chain),
+                             "an .fcm file has no room for collision boxes")
+        lines = machine.importRemarks(self.machine)
+        self.assertTrue(any("collision" in line for line in lines),
+                        "nothing warned that the check would find nothing: %r" % lines)
+
+    def test_a_machine_from_a_chain_of_kin5ax_says_none_of_this(self):
+        from kin5axcam import machine
+
+        plain = machine.Create("FromKin5ax", CHAIN, document=self.document)
+        self.document.recompute()
+        self.assertEqual([], list(plain.FcmRemarks))
+        self.assertEqual([], machine.importRemarks(plain))
+        with kin5ax.Chain(CHAIN) as chain:
+            self.assertGreater(machine.collisionBoxCount(chain), 0, "the shipped models have boxes")
+
+    def test_the_parts_of_the_machine_are_built_from_it_like_any_other(self):
+        #a machine that has not been posed yet carries no configuration of its own; the proxy
+        #answers with five zeros until one is set, as it does for a chain of kin5ax
+        self.assertEqual(kin5ax.AXES, len(self.machine.Proxy.configuration(self.machine)))
+        self.assertIsNotNone(self.machine.ToolMount)
+        self.assertIsNotNone(self.machine.Material)
+        self.machine.Configuration = [0.0] * kin5ax.AXES
+        self.assertEqual(kin5ax.AXES, len(self.machine.Configuration))

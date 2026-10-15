@@ -2,8 +2,8 @@
 
 ## The two halves
 
-The kinematics, the collision checks and the voxel cutting are C++, in
-[kin5ax](https://github.com/zdroyer/kin5ax). This repository is the FreeCAD half: the operation, the
+The kinematics, the collision checks, the voxel cutting and the FreeCAD machine file bridge are
+C++, in [kin5ax](https://github.com/zdroyer/kin5ax). This repository is the FreeCAD half: the operation, the
 postprocessor, the machine in the document, the player, and a `ctypes` binding to the C interface of
 that library. A change to how a machine is solved belongs there; a change to what FreeCAD shows
 belongs here.

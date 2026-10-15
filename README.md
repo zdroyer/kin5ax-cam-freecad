@@ -245,6 +245,17 @@ FreeCADGui.runCommand("CAM_Kin5axMachine")      # asks for a .kc.json, puts the 
 FreeCADGui.runCommand("CAM_Kin5axSimulate")     # the job on the machine, solved, and the player
 ```
 
+**A FreeCAD machine definition opens too.** The dialog takes `.fcm` beside the `.kc` and
+`.kc.json` of kin5ax, which matters because FreeCAD 1.2 ships its machines as `.fcm` and that is
+the file you are likely to have. The conversion is lossy and says so: what it could not carry
+across is shown when the machine is made and kept on it as `FcmRemarks`. Read it. The one loss
+worth knowing in advance is that **an `.fcm` has no collision boxes at all**, so a machine
+imported from one is a stick figure and a simulation of it will not find a collision whatever the
+tool does — which looks exactly like a machine that is safe. The addon says that too. Two
+properties carry the one convention an `.fcm` cannot state, `NegateTableLinearAxes` and
+`NegateTableRotaryAxes`: set wrong, a part comes out mirrored, and only somebody with the real
+machine knows.
+
 **Fourteen machines come with the addon**, in [`Resources/machines/`](Resources/machines/), and the
 file dialog opens on them, so there is something to put in the document on the day it is installed.
 Three are real machines from their catalogues, with the travels and the swivel ranges of the
@@ -522,7 +533,7 @@ py -3 run_tests.py                                    # the geometry, no FreeCAD
 "C:/Program Files/FreeCAD 1.1.1/bin/freecadcmd.exe" run_tests.py   # and the FreeCAD ones
 ```
 
-158 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
+169 tests. The geometry of `pathgen.py` is checked against surfaces whose answers are known on paper
 — a plane, a sphere, a plane with a hole in it — because the generator asks a surface only four
 things (`ParameterRange`, `valueAt`, `normalAt`, `isPartOfDomain`) and a test can answer them
 without a CAD kernel. `Part.Face` answers the same four, which `tests/test_freecad.py` checks

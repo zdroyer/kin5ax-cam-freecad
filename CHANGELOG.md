@@ -26,6 +26,15 @@ Carries kin5ax 0.2.0, and needs it: the binding refuses 0.1.
 
 ### Added
 
+- **A FreeCAD machine definition (`.fcm`) can be opened as a machine.** FreeCAD 1.2 ships its
+  machines in that form, so it is the file a FreeCAD user actually has. The conversion is lossy:
+  what it could not carry across is shown when the machine is made and kept on it as
+  `FcmRemarks`, and the addon adds one remark of its own, that an `.fcm` has no collision boxes
+  and so a simulation of such a machine will not find a collision whatever the tool does.
+  `NegateTableLinearAxes` and `NegateTableRotaryAxes` carry the one convention the file cannot
+  state.
+- `Chain.from_fcm()`, `Chain.write_fcm()` and `Chain.fcm_remarks()` in the binding, over the
+  `kin5axfcm.h` bridge of kin5ax 0.2.0.
 - `Chain.unit()`, `Chain.unit_name()` and `Chain.unit_in_mm()` in the binding.
 
 ## [0.1.0] — 2026-10-14

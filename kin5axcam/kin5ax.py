@@ -16,10 +16,10 @@ authority on what each call means.
             if location.has_solution:
                 print(location.q)
 
-**Lengths are in the unit of the chain file**, which is metres for every machine
-shipped with the library, and the files do not say so themselves. Nothing here
-converts: the caller scales on the way in and on the way out, and says what it
-scaled by. Angles are radians.
+**Lengths are in the unit of the chain file**, and every file says which:
+``Chain.unit_in_mm()`` is what to multiply by, 1000 for the metres every machine
+shipped with the library is in. Nothing here converts: the caller scales on the
+way in and on the way out, knowing what it scales by. Angles are radians.
 
 **Where the shared library is.** ``kin5axc.dll`` or ``libkin5axc.so`` is looked
 for in this order: the path in the environment variable ``KIN5AXC_LIBRARY``; the
@@ -48,7 +48,7 @@ NAME_MAX = 64                           #the longest name of a link, terminating
 #the header it mirrors. A loaded library is checked against it, because the two are shipped together
 #but can be installed apart - a user who builds the library by hand, or keeps an older copy in
 #KIN5AXC_LIBRARY, would otherwise meet a structure read at the wrong offsets rather than a message.
-REQUIRED_VERSION = (0, 1)
+REQUIRED_VERSION = (0, 2)
 
 #k5_status: what a call can answer
 OK = 0
@@ -99,6 +99,12 @@ LINK_REVOLUTE = 1
 #k5_chain_part
 PART_TOOL = 0
 PART_MATERIAL_HOLDER = 1
+
+#k5_unit: what every length of a chain file is in. A file says, and one that does not is refused.
+UNIT_MM = 0
+UNIT_M = 1
+UNIT_IN = 2
+UNIT_NAMES = {UNIT_MM: "mm", UNIT_M: "m", UNIT_IN: "in"}
 
 #k5_tool_shape
 TOOL_BALL_NOSE = 0                      #a ball of radius r at the tip, programmed at its centre
@@ -446,6 +452,10 @@ def _declare(lib):
     lib.k5_chain_name.argtypes = [_chain_t, ctypes.c_char_p, ctypes.c_size_t]
     lib.k5_chain_is_5c.restype = ctypes.c_int
     lib.k5_chain_is_5c.argtypes = [_chain_t, _int_p]
+    lib.k5_chain_unit.restype = ctypes.c_int
+    lib.k5_chain_unit.argtypes = [_chain_t, _int_p]
+    lib.k5_unit_in_millimetres.restype = ctypes.c_int
+    lib.k5_unit_in_millimetres.argtypes = [ctypes.c_int, _double_p]
     lib.k5_chain_link_count.restype = ctypes.c_int
     lib.k5_chain_link_count.argtypes = [_chain_t, _size_p]
     lib.k5_chain_link.restype = ctypes.c_int
@@ -779,6 +789,23 @@ class Chain(object):
         out = ctypes.c_int()
         _check(self._lib, self._lib.k5_chain_is_5c(self._handle, ctypes.byref(out)), "k5_chain_is_5c")
         return bool(out.value)
+
+    def unit(self):
+        """What every length of this chain is in, as its file declared it: UNIT_MM, UNIT_M or UNIT_IN."""
+        out = ctypes.c_int()
+        _check(self._lib, self._lib.k5_chain_unit(self._handle, ctypes.byref(out)), "k5_chain_unit")
+        return out.value
+
+    def unit_name(self):
+        """The same as the file spells it: "mm", "m" or "in"."""
+        return UNIT_NAMES.get(self.unit(), "unit %d" % self.unit())
+
+    def unit_in_mm(self):
+        """How many millimetres one length unit of this chain is: what a caller multiplies by."""
+        out = ctypes.c_double()
+        _check(self._lib, self._lib.k5_unit_in_millimetres(self.unit(), ctypes.byref(out)),
+               "k5_unit_in_millimetres")
+        return out.value
 
     def link_count(self):
         out = ctypes.c_size_t()

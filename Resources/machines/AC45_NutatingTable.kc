@@ -3,6 +3,7 @@
 
 <!ELEMENT kinematic_chain (tool_part, material_holder_part)>
 <!ATTLIST kinematic_chain
+	unit (mm|m|in) #REQUIRED
 	name CDATA #IMPLIED
 >
 <!ELEMENT tool_part (segment+)>
@@ -52,7 +53,7 @@
   Linear travels from home: X -0.35..+0.35, Y -0.25..+0.25, Z -0.45..+0.20.
   Solids: inclined bearing housing (fixed), cradle (swings with A), platter (turns with C), spindle head.
 -->
-<kinematic_chain name="AC 45deg nutating table" >
+<kinematic_chain unit="m" name="AC 45deg nutating table" >
 <tool_part>
 <segment type="PRISMATIC_LINK" name="X" parameter_value_minimum="-0.35" parameter_value_maximum="0.35" >
 <initial_translation x="0" y="0.5" z="0.9"/>

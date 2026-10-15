@@ -3,6 +3,7 @@
 
 <!ELEMENT kinematic_chain (tool_part, material_holder_part)>
 <!ATTLIST kinematic_chain
+	unit (mm|m|in) #REQUIRED
 	name CDATA #IMPLIED
 	machine CDATA #IMPLIED
 	author CDATA #IMPLIED
@@ -45,7 +46,7 @@
 	alpha CDATA #REQUIRED
 >
 ]>
-<kinematic_chain name="Reiden RX10, A swivel head, XY cross table with C rotary table" machine="Reiden RX10" author="Claude, from public catalogue data; the offsets are estimates" modified="2026-09-23">
+<kinematic_chain unit="m" name="Reiden RX10, A swivel head, XY cross table with C rotary table" machine="Reiden RX10" author="Claude, from public catalogue data; the offsets are estimates" modified="2026-09-23">
 <tool_part>
 <segment type="PRISMATIC_LINK" name="Z" parameter_value_minimum="-0.4" parameter_value_maximum="0.41" >
 <initial_translation x="0" y="0" z="0"/>

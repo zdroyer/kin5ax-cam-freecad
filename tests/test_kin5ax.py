@@ -156,6 +156,13 @@ class AMachine(unittest.TestCase):
         self.tool.close()
         self.chain.close()
 
+    def test_it_says_what_unit_its_file_is_in(self):
+        """Every chain file declares its unit, and the models shipped are metres: the caller
+        multiplies by what the chain says rather than by a number it was told to assume."""
+        self.assertEqual(kin5ax.UNIT_M, self.chain.unit())
+        self.assertEqual("m", self.chain.unit_name())
+        self.assertEqual(1000.0, self.chain.unit_in_mm())
+
     def test_it_is_a_five_axis_chain_of_three_linear_and_two_rotary_joints(self):
         self.assertTrue(self.chain.is_5c())
         links = self.chain.links()

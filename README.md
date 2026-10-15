@@ -198,7 +198,7 @@ the line would have been, a count at the end of the operation, and a warning in 
 
 | argument | |
 |---|---|
-| `--machine-unit m\|mm` | the length unit of the chain file; `m` for the machines kin5ax ships, and the default |
+| `--machine-unit mm\|m\|in` | takes the chain file to be in that unit instead of the one it declares; for testing, since every file says |
 | `--rotary-letters AC` | what the control calls the two rotary axes; the default is the names of the links when they are letters |
 | `--holder-length 50`, `--holder-radius 30` | the holder, in mm, which a tool bit of FreeCAD does not describe |
 | `--no-limits`, `--no-collisions` | leave a check out |
@@ -224,9 +224,11 @@ different version read through it would not raise an error, it would read a stru
 the wrong offsets. `REQUIRED_VERSION` is what this addon was written against and anything
 else is refused by name. While the major number is 0 the minor has to match exactly.
 
-Lengths cross that boundary **in the unit of the chain file**, which the file does not state and
-which is metres for every machine shipped with kin5ax. The post scales by `--machine-unit`; anything
-else calling the binding scales for itself.
+Lengths cross that boundary **in the unit of the chain file**, and every file says which: `unit` is
+a required field of both forms, `mm`, `m` or `in`, and a file without it is refused rather than
+guessed at. `Chain.unit_in_mm()` is what to multiply by. The machines shipped with kin5ax are
+metres; the post and the machine in the document read the unit from the file, and anything else
+calling the binding scales for itself.
 
 The file keeps the licence it came from, **LGPL-2.1-or-later**, not the MIT of the rest of kin5ax,
 and keeps its FreeCAD copyright lines. Being a copy rather than a rewrite means a fix to FreeCAD's
@@ -263,9 +265,10 @@ path can be cut on a trunnion table rather than on a fork head.
 | `3CWithSphericalWrist_*` | three linear axes and a spherical wrist, which meets itself when it leans far |
 
 Those three catalogue machines come as `.kc.json` as well as `.kc`; both forms are the same machine
-and either opens. **The lengths in all of them are metres**, which is what the machine's
-`UnitInMillimetres` of 1000 says; a file of your own in millimetres needs that set to 1 after it is
-opened, because nothing in a chain file states its unit.
+and either opens. **The lengths in all of them are metres, and the files say so**: `unit` is a
+required field of a chain file, and the machine's `UnitInMillimetres` is read from it, 1000 for
+these. A file of your own says `mm` or `in` and is scaled accordingly; one that says nothing is
+refused, since its numbers are not lengths until it does.
 
 After you take a machine from somewhere else, the dialog opens there instead, which is where your
 own machines are once you have any.
@@ -322,7 +325,7 @@ at every one of them either way. *Every location* draws them all.
 
 Properties worth knowing: `Operations` (none means every active operation of the job), the holder
 the tool bit does not describe, the two checks, `Interpolate` with `MaxStep` and `MaxTurn`, and
-`Start`. The unit of the chain file is on the machine, `UnitInMillimetres`.
+`Start`. The unit of the chain file is on the machine, `UnitInMillimetres`, read from the file.
 
 **With no machine at all.** Leave `Machine` empty — the simulate command does, when the document has
 no machine — and there is nothing to solve: the path itself is the trajectory, made as dense as the

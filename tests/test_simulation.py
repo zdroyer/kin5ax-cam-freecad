@@ -22,6 +22,17 @@ CHAINS = os.path.join(HERE, "Resources", "machines")
 CHAIN = os.path.join(CHAINS, "AC_TiltRotaryTable.kc")
 
 
+def is_origin_of_a_part(name):
+    """Whether that name is one of the origin objects FreeCAD gives every App::Part.
+
+    A part comes with an Origin and its three planes and three axes, and they go
+    with it when it is deleted. They carry FreeCAD's names rather than the name
+    of whatever made the part.
+    """
+    return name.startswith(("Origin", "XY_Plane", "XZ_Plane", "YZ_Plane",
+                            "X_Axis", "Y_Axis", "Z_Axis"))
+
+
 def library_is_there():
     try:
         kin5ax.load()
@@ -114,8 +125,10 @@ class AJobOnAMachine(unittest.TestCase):
         linked = {link.LinkedObject.Name for link in self.simulation.Workpiece}
         self.assertIn(self.job.Stock.Name, linked)
         self.assertTrue(any(o.Name in linked for o in self.job.Model.Group), "the model")
+        holder = self.simulation.WorkpieceFrame
+        self.assertIn(holder, self.machine.Material.Group, "the holder stands on the table")
         for link in self.simulation.Workpiece:
-            self.assertIn(link, self.machine.Material.Group)
+            self.assertIn(link, holder.Group, "and the part is held by it")
             self.assertTrue(link.LinkTransform, "a link carries the placement of what it links to")
 
     def test_the_stock_is_where_the_cut_is_even_when_the_part_is_not_at_the_origin(self):
@@ -168,7 +181,8 @@ class AJobOnAMachine(unittest.TestCase):
         sim.Proxy.clearPicture(sim)
         after = {o.Name for o in self.document.Objects}
         gone = before - after
-        self.assertTrue(all(name.startswith(sim.Name) for name in gone), gone)
+        self.assertTrue(all(name.startswith(sim.Name) or is_origin_of_a_part(name) for name in gone),
+                        gone)
         self.assertFalse(any(name.startswith(sim.Name) and name != sim.Name for name in after),
                          "nothing of the simulation but the simulation itself")
 
@@ -439,7 +453,7 @@ class AJobOnAMachine(unittest.TestCase):
         self.assertFalse(any(self.simulation.Solved), "nothing is reachable five metres away")
         self.assertIsNotNone(self.simulation.Unreachable)
         self.assertEqual(self.simulation.StepCount, len(self.simulation.Unreachable.Shape.Vertexes))
-        self.assertIn(self.simulation.Unreachable, self.machine.Material.Group)
+        self.assertIn(self.simulation.Unreachable, self.simulation.WorkpieceFrame.Group)
         self.assertNotIn("solved", self.simulation.Report.replace("unsolved", ""))
 
     def test_the_stock_is_cut_as_the_machine_goes(self):
@@ -447,7 +461,7 @@ class AJobOnAMachine(unittest.TestCase):
         sim = self.simulation
         self.assertTrue(sim.Cut)
         self.assertIsNotNone(sim.Surface, "the stock as a mesh of voxel faces, from the start")
-        self.assertIn(sim.Surface, self.machine.Material.Group)
+        self.assertIn(sim.Surface, sim.WorkpieceFrame.Group)
         whole = sim.Surface.Mesh.CountFacets
         self.assertGreater(whole, 0)
         self.assertEqual(0, whole % 2, "two triangles per face")

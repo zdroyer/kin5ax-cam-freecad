@@ -3,6 +3,7 @@
 
 <!ELEMENT kinematic_chain (tool_part, material_holder_part)>
 <!ATTLIST kinematic_chain
+	unit (mm|m|in) #REQUIRED
 	name CDATA #IMPLIED
 >
 <!ELEMENT tool_part (segment+)>
@@ -54,7 +55,7 @@
   where home sits inside each stroke is my choice, so that B = +90 can reach the bar end face).
   Solids: headstock (fixed), collet nose (turns with A), B housing (moves with XYZ), spindle (swings with B).
 -->
-<kinematic_chain name="WM 508MT2 AB mill-turn" >
+<kinematic_chain unit="m" name="WM 508MT2 AB mill-turn" >
 <tool_part>
 <segment type="PRISMATIC_LINK" name="X" parameter_value_minimum="-0.12" parameter_value_maximum="0.28" >
 <initial_translation x="0" y="0.3" z="0.6"/>

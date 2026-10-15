@@ -1,6 +1,7 @@
 {
   "format": "kin5ax-chain",
   "version": 1,
+  "unit": "m",
   "name": "Reiden RX10, A swivel head, XY cross table with C rotary table",
   "machine": "Reiden RX10",
   "author": "Claude, from public catalogue data; the offsets are estimates",

@@ -373,6 +373,13 @@ class ThePostWithAMachine(ALeaningPathToPost):
             previous = point
         self.assertEqual(expected, len(self.axis_lines(gcode)))
 
+    def test_the_unit_is_the_one_the_file_declares_unless_said(self):
+        """The file says metres, so --machine-unit m changes nothing; and inches are a unit too."""
+        self.lean()
+        self.assertEqual(self.machined(), self.machined("--machine-unit m"))
+        self.assertNotEqual(self.machined(), self.machined("--machine-unit in"),
+                            "taking the same numbers for inches moves every solved axis")
+
     def test_the_rotary_letters_can_be_said(self):
         self.lean()
         gcode = self.machined("--rotary-letters BC")

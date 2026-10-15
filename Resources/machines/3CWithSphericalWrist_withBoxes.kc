@@ -3,6 +3,7 @@
 
 <!ELEMENT kinematic_chain (tool_part, material_holder_part)>
 <!ATTLIST kinematic_chain
+	unit (mm|m|in) #REQUIRED
 	name CDATA #IMPLIED
 >
 <!ELEMENT tool_part (segment+)>
@@ -42,7 +43,7 @@
 	alpha CDATA #REQUIRED
 >
 ]>
-<kinematic_chain >
+<kinematic_chain unit="m" >
 <tool_part>
 <segment type="PRISMATIC_LINK" name="Z" >
 <initial_translation x="1" y="0" z="0"/>

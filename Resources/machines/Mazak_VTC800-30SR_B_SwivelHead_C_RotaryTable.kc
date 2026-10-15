@@ -3,6 +3,7 @@
 
 <!ELEMENT kinematic_chain (tool_part, material_holder_part)>
 <!ATTLIST kinematic_chain
+	unit (mm|m|in) #REQUIRED
 	name CDATA #IMPLIED
 	machine CDATA #IMPLIED
 	author CDATA #IMPLIED
@@ -45,7 +46,7 @@
 	alpha CDATA #REQUIRED
 >
 ]>
-<kinematic_chain name="Mazak VTC-800/30SR, B swivel head, C rotary table on the fixed table" machine="Mazak VTC-800/30SR" author="Claude, from public catalogue data; the offsets are estimates" modified="2026-09-23">
+<kinematic_chain unit="m" name="Mazak VTC-800/30SR, B swivel head, C rotary table on the fixed table" machine="Mazak VTC-800/30SR" author="Claude, from public catalogue data; the offsets are estimates" modified="2026-09-23">
 <tool_part>
 <segment type="PRISMATIC_LINK" name="X" parameter_value_minimum="-1.5" parameter_value_maximum="1.5" >
 <initial_translation x="0" y="0" z="0"/>

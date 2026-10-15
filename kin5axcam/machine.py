@@ -26,7 +26,8 @@ cyan for a negative one, in the frame of the joint whose Z is its axis.
 the size of the machine unless set; ``ShowJoints`` hides them.
 
 Lengths cross from the unit of the chain file into millimetres through
-``UnitInMillimetres``, 1000 for the metres the shipped machines are in.
+``UnitInMillimetres``, which is read from the file: every chain file says what
+its lengths are in, and the machines shipped with kin5ax are metres, so 1000.
 """
 
 import math
@@ -107,11 +108,16 @@ class ObjectMachine(object):
          "The part at the frame of the material: a simulation puts the model and the stock in it", None),
     )
 
-    def __init__(self, obj, chain_file, unit_in_mm):
+    def __init__(self, obj, chain_file, unit_in_mm=None):
         obj.Proxy = self
         self._chain = None
         ensure(obj, self.PROPERTIES)
         obj.ChainFile = chain_file
+        #the file says what its lengths are in; a value given here overrides it, for a test that
+        #wants to see a machine at another scale
+        if unit_in_mm is None:
+            with kin5ax.Chain(chain_file) as chain:
+                unit_in_mm = chain.unit_in_mm()
         obj.UnitInMillimetres = float(unit_in_mm)
         obj.ArmRadius = 0.0
         obj.JointSize = 0.0
@@ -520,8 +526,11 @@ def remember_machine_folder(path):
         FreeCAD.ParamGet(PARAMETERS).SetString("LastMachineFolder", folder)
 
 
-def Create(name, chain_file, unit_in_mm=1000.0, document=None):
-    """A machine group in the document, built from the chain file, standing at zero."""
+def Create(name, chain_file, unit_in_mm=None, document=None):
+    """A machine group in the document, built from the chain file, standing at zero.
+
+    The unit of the lengths comes from the file; unit_in_mm overrides it.
+    """
     if document is None:
         document = FreeCAD.ActiveDocument
     if not os.path.isfile(chain_file):

@@ -52,6 +52,16 @@ class AMachineInADocument(unittest.TestCase):
     def tearDown(self):
         FreeCAD.closeDocument(self.document.Name)
 
+    def test_the_unit_comes_from_the_file_unless_it_is_given(self):
+        """The file says metres, so the machine says 1000 without being told; a value given
+        overrides it, which is what a test that wants another scale uses."""
+        from kin5axcam import machine
+
+        own = machine.Create("FromTheFile", CHAIN, document=self.document)
+        self.assertEqual(1000.0, own.UnitInMillimetres)
+        told = machine.Create("Told", CHAIN, 1.0, self.document)
+        self.assertEqual(1.0, told.UnitInMillimetres)
+
     def test_it_has_a_part_per_segment_of_each_branch_and_the_two_end_frames(self):
         with kin5ax.Chain(CHAIN) as chain:
             tool_segments = len(chain.frames(kin5ax.PART_TOOL))

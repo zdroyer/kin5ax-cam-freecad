@@ -10,6 +10,24 @@ the two are released together.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-15
+
+Carries kin5ax 0.2.0, and needs it: the binding refuses 0.1.
+
+### Changed
+
+- **Every chain file says what its lengths are in.** `unit` is a required field of `.kc` and
+  `.kc.json`, one of `mm`, `m` and `in`, and a file without it is refused rather than guessed at.
+  The fourteen machines shipped say `m`. A file of your own written before this needs the line
+  added.
+- The machine in the document reads `UnitInMillimetres` from its file instead of assuming 1000.
+- The postprocessor takes the unit from the file; `--machine-unit` now only overrides it, and
+  accepts `in` as well.
+
+### Added
+
+- `Chain.unit()`, `Chain.unit_name()` and `Chain.unit_in_mm()` in the binding.
+
 ## [0.1.0] — 2026-10-14
 
 The first release: everything below arrived while the addon lived inside the library repository, and
@@ -45,5 +63,6 @@ this is the point at which it became one of its own.
 - **The kin5ax shared library** for Windows and Linux under `lib/`, so that the addon works as
   installed.
 
-[Unreleased]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zdroyer/kin5ax-cam-freecad/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zdroyer/kin5ax-cam-freecad/releases/tag/v0.1.0

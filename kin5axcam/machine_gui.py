@@ -115,7 +115,7 @@ class CommandMachine(object):
         document = FreeCAD.ActiveDocument
         document.openTransaction("Machine from kin5ax")
         try:
-            obj = machine.Create("Machine", path, 1000.0, document)
+            obj = machine.Create("Machine", path, document=document)
             document.recompute()
         except Exception as problem:
             document.abortTransaction()

@@ -61,4 +61,4 @@ unversioned one is not loaded and not complained about.
 
 Comments say why, not what. A test is named for the thing it promises, so that a failure reads as a
 sentence about the program rather than a number. Lengths crossing into the library are in the unit
-of the chain file, which is metres for every model shipped, and the caller scales.
+of the chain file, which the file declares and `Chain.unit_in_mm()` reports, and the caller scales.

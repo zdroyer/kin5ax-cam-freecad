@@ -188,7 +188,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--machine-unit",
-    help='the length unit of the chain file, "m" or "mm", default="m"',
+    help='the length unit the chain file is taken to be in, "mm", "m" or "in"; the default is what the '
+    'file itself says, which is the right answer unless you are testing',
 )
 parser.add_argument(
     "--rotary-letters",
@@ -262,7 +263,7 @@ ARC_COMMANDS = ("G2", "G02", "G3", "G03")
 
 # The machine, when the moves are to be solved rather than handed to the control with a vector.
 MACHINE = None
-MACHINE_UNIT_IN_MM = 1000.0               # metres, the unit of the chain files that ship with kin5ax
+MACHINE_UNIT_IN_MM = None                 # None: what the chain file says; a number overrides it
 ROTARY_LETTERS = None                     # None: the names of the links, or the guess of kin5ax
 HOLDER_LENGTH_MM = 50.0
 HOLDER_RADIUS_MM = 30.0
@@ -363,7 +364,7 @@ def processArguments(argstring):
             VECTOR_PRECISION = int(args.vector_precision)
         MACHINE = args.machine
         if args.machine_unit:
-            MACHINE_UNIT_IN_MM = {"m": 1000.0, "mm": 1.0}[args.machine_unit.lower()]
+            MACHINE_UNIT_IN_MM = {"m": 1000.0, "mm": 1.0, "in": 25.4}[args.machine_unit.lower()]
         ROTARY_LETTERS = args.rotary_letters.upper() if args.rotary_letters else None
         if ROTARY_LETTERS is not None and (len(ROTARY_LETTERS) != 2
                                            or any(c not in "ABC" for c in ROTARY_LETTERS)):
@@ -722,8 +723,10 @@ class Machine(object):
         if not self.chain.is_5c():
             raise ValueError("%s is not a five-axis chain of three linear and two rotary joints"
                              % chain_file)
+        #every chain file says what its lengths are in; --machine-unit overrides it
+        unit_in_mm = MACHINE_UNIT_IN_MM if MACHINE_UNIT_IN_MM is not None else self.chain.unit_in_mm()
         self.options = solve.Options(
-            unit_in_mm=MACHINE_UNIT_IN_MM, holder_length_mm=HOLDER_LENGTH_MM,
+            unit_in_mm=unit_in_mm, holder_length_mm=HOLDER_LENGTH_MM,
             holder_radius_mm=HOLDER_RADIUS_MM, check_limits=CHECK_LIMITS,
             check_collisions=CHECK_COLLISIONS, interpolate=INTERPOLATE, max_step_mm=MAX_STEP_MM,
             max_turn_degrees=MAX_TURN_DEGREES, start=START_CRITERION, rotary_letters=ROTARY_LETTERS)

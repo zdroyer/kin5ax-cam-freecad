@@ -9,7 +9,7 @@ addon works as installed. The Addon Manager copies files; it cannot compile anyt
 | `kin5axc.dll` | Windows x86-64 | MSVC v143, Release |
 | `libkin5axc.so` | Linux x86-64 | GCC 15, Release |
 
-Both are version 0.1.0, which is the version this addon is written against. `kin5axcam.kin5ax`
+Both are version 0.2.0, which is the version this addon is written against. `kin5axcam.kin5ax`
 refuses a library whose major and minor differ, so the pair is released together. macOS is not built
 yet; on macOS, and on any Linux where the shipped object will not load, build the library and point
 the addon at it.
